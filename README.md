@@ -216,11 +216,11 @@ You could follow [this pipeline](https://github.com/Paper99/E2FGVI#evaluation) t
    If you find our repo useful for your research, please consider citing our paper:
 
    ```bibtex
-   @inproceedings{li2022e2fgvi,
-     author = {Zhen Li, Cheng-Ze Lu, Jianhua Qin, Chun-Le Guo, Ming-Ming Cheng},
-     title = {Towards An End-to-End Framework for Flow-Guided Video Inpainting},
-     booktitle = {Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition},
-     year={2022}
+   @inproceedings{liCvpr22vInpainting,
+      title={Towards An End-to-End Framework for Flow-Guided Video Inpainting},
+      author={Zhen Li and Cheng-Ze Lu and Qin Jianhua and Chun-Le Guo and Ming-Ming Cheng},
+      booktitle={IEEE Conference on Computer Vision and Pattern Recognition},
+      year={2022}
    }
    ```
 ## Contact
