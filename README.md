@@ -79,7 +79,7 @@ methods.
 1. Clone Repo
 
    ```bash
-   git clone https://github.com/Paper99/E2FGVI.git
+   git clone https://github.com/MCG-NKU/E2FGVI.git
    ```
 
 2. Create Conda Environment and Install Dependencies
@@ -206,7 +206,7 @@ The training loss can be monitored by running:
 tensorboard --logdir release_model                                                   
 ```
 
-You could follow [this pipeline](https://github.com/Paper99/E2FGVI#evaluation) to evaluate your model.
+You could follow [this pipeline](https://github.com/MCG-NKU/E2FGVI#evaluation) to evaluate your model.
 ## Results  
 
 ### Quantitative results
@@ -218,8 +218,8 @@ You could follow [this pipeline](https://github.com/Paper99/E2FGVI#evaluation) t
    ```bibtex
    @inproceedings{liCvpr22vInpainting,
       title={Towards An End-to-End Framework for Flow-Guided Video Inpainting},
-      author={Zhen Li and Cheng-Ze Lu and Qin Jianhua and Chun-Le Guo and Ming-Ming Cheng},
-      booktitle={IEEE Conference on Computer Vision and Pattern Recognition},
+      author={Li, Zhen and Lu, Cheng-Ze and Qin, Jianhua and Guo, Chun-Le and Cheng, Ming-Ming},
+      booktitle={IEEE Conference on Computer Vision and Pattern Recognition (CVPR)},
       year={2022}
    }
    ```
@@ -229,6 +229,6 @@ If you have any question, please feel free to contact us via `zhenli1031ATgmail.
 
 ## Acknowledgement
 
-The codebase is maintained by [Zhen Li](https://github.com/Paper99) and [Cheng-Ze Lu](https://github.com/LGYoung).
+This repository is maintained by [Zhen Li](https://paper99.github.io) and [Cheng-Ze Lu](https://github.com/LGYoung).
 
 This code is based on [STTN](https://github.com/researchmm/STTN), [FuseFormer](https://github.com/ruiliu-ai/FuseFormer), [Focal-Transformer](https://github.com/microsoft/Focal-Transformer), and [MMEditing](https://github.com/open-mmlab/mmediting).
