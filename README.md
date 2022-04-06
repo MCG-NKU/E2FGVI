@@ -13,7 +13,7 @@ This repository contains the official implementation of the following paper:
 [Poster (TBD)]
 [Video (TBD)]
 
-You can try our colab demo here: [Open in Colab] (TBD)
+You can try our colab demo here: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/12rwY2gtG8jVWlNx9pjmmM8uGmh5ue18G?usp=sharing)
 
 ## Demo
 
@@ -69,7 +69,6 @@ You can try our colab demo here: [Open in Colab] (TBD)
 methods.
 
 ## Work in Progress
-- [ ] Colab demo
 - [ ] Update arXiv link & website page
 - [ ] High-resolution version
 - [ ] Update Youtube / Bilibili link
