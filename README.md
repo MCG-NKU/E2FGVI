@@ -1,4 +1,6 @@
 # E<sup>2</sup>FGVI (CVPR 2022)
+[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/towards-an-end-to-end-framework-for-flow/video-inpainting-on-davis)](https://paperswithcode.com/sota/video-inpainting-on-davis?p=towards-an-end-to-end-framework-for-flow)
+[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/towards-an-end-to-end-framework-for-flow/video-inpainting-on-youtube-vos)](https://paperswithcode.com/sota/video-inpainting-on-youtube-vos?p=towards-an-end-to-end-framework-for-flow)
 
 ![Python 3.7](https://img.shields.io/badge/python-3.7-green.svg?style=plastic)
 ![pytorch 1.6.0](https://img.shields.io/badge/pytorch-1.5.1-green.svg?style=plastic)
@@ -8,7 +10,7 @@ This repository contains the official implementation of the following paper:
 > Zhen Li<sup>#</sup>, Cheng-Ze Lu<sup>#</sup>, Jianhua Qin, Chun-Le Guo<sup>*</sup>, Ming-Ming Cheng<br>
 > IEEE/CVF Conference on Computer Vision and Pattern Recognition (**CVPR**), 2022<br>
 
-[Paper]
+[[Paper](https://arxiv.org/abs/2204.02663)]
 [Project Page (TBD)]
 [Poster (TBD)]
 [Video (TBD)]
@@ -69,7 +71,7 @@ You can try our colab demo here: [![Open In Colab](https://colab.research.google
 methods.
 
 ## Work in Progress
-- [ ] Update arXiv link & website page
+- [ ] Update website page
 - [ ] High-resolution version
 - [ ] Update Youtube / Bilibili link
 
