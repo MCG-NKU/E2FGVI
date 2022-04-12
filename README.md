@@ -94,6 +94,8 @@ methods.
    - CUDA >= 9.2
    - [mmcv-full](https://github.com/open-mmlab/mmcv#installation) (following the pipeline to install)
 
+   If the `environment.yml` file does not work for you, please follow [this issue](https://github.com/MCG-NKU/E2FGVI/issues/3) to solve the problem.
+
 ## Get Started
 ### Prepare pretrained models
 Before performing the following steps, please download our pretrained model first.
