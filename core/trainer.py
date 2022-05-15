@@ -311,9 +311,7 @@ class Trainer:
             gt_local_frames = (frames[:, :l_t, ...] + 1) / 2
 
             pred_imgs, pred_flows = self.netG(masked_frames, l_t)
-            pred_imgs = pred_imgs.view(b, -1, c, h, w).view(-1, c, h, w)
-            frames = frames.view(-1, c, h, w)
-            masks = masks.view(-1, 1, h, w)
+            pred_imgs = pred_imgs.view(b, -1, c, h, w)
             comp_imgs = frames * (1. - masks) + masks * pred_imgs
 
             # compute flow completion loss

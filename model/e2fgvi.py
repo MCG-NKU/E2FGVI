@@ -268,9 +268,9 @@ class Discriminator(BaseNetwork):
             self.init_weights()
 
     def forward(self, xs):
-        # T, C, H, W = xs.shape
-        xs_t = torch.transpose(xs, 0, 1)
-        xs_t = xs_t.unsqueeze(0)  # B, C, T, H, W
+        # T, C, H, W = xs.shape (old)
+        # B, T, C, H, W (new)
+        xs_t = torch.transpose(xs, 1, 2)
         feat = self.conv(xs_t)
         if self.use_sigmoid:
             feat = torch.sigmoid(feat)
