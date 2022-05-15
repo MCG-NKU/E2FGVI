@@ -11,12 +11,17 @@ This repository contains the official implementation of the following paper:
 > IEEE/CVF Conference on Computer Vision and Pattern Recognition (**CVPR**), 2022<br>
 
 [[Paper](https://arxiv.org/abs/2204.02663)]
+[[Demo Video (Youtube)](https://www.youtube.com/watch?v=N--qC3T2wc4)]
+[[演示视频 (B站)](https://www.bilibili.com/video/BV1QY4y1r7TX?spm_id_from=333.999.0.0)]
 [Project Page (TBD)]
 [Poster (TBD)]
-[Video (TBD)]
 
 You can try our colab demo here: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/12rwY2gtG8jVWlNx9pjmmM8uGmh5ue18G?usp=sharing)
 
+## :star: News
+- *2022.05.15:* We release E<sup>2</sup>FGVI-HQ, which can handle videos with **arbitrary resolution**. This model could generalize well to much higher resolutions, while it only used 432x240 videos for training. Besides, it performs **better** than our original model on both PSNR and SSIM metrics. :link: Download link: [[Google Drive](https://drive.google.com/file/d/10wGdKSUOie0XmCr8SQ2A2FeDe-mfn5w3/view?usp=sharing)] [[Baidu Disk](https://pan.baidu.com/s/1jfm1oFU1eIy-IRfuHP8YXw?pwd=ssb3)].
+
+- *2022.04.06:* Our code is publicly available.
 ## Demo
 
 ![teaser](./figs/teaser.gif)
@@ -72,8 +77,8 @@ methods.
 
 ## Work in Progress
 - [ ] Update website page
-- [ ] High-resolution version
-- [ ] Update Youtube / Bilibili link
+- [ ] Hugging Face demo
+- [ ] Efficient inference
 
 ## Dependencies and Installation
 
@@ -100,7 +105,10 @@ methods.
 ### Prepare pretrained models
 Before performing the following steps, please download our pretrained model first.
 
-:link: **Download Links:** [[Google Drive](https://drive.google.com/file/d/1tNJMTJ2gmWdIXJoHVi5-H504uImUiJW9/view?usp=sharing)] [[Baidu Disk](https://pan.baidu.com/s/1qXAErbilY_n_Fh9KB8UF7w?pwd=lsjw)]
+:link: **Download Links:** 
+[[Google Drive](https://drive.google.com/file/d/1tNJMTJ2gmWdIXJoHVi5-H504uImUiJW9/view?usp=sharing)] [[Baidu Disk](https://pan.baidu.com/s/1qXAErbilY_n_Fh9KB8UF7w?pwd=lsjw)]
+
+
 
 Then, unzip the file and place the models to `release_model` directory.
 
@@ -108,6 +116,7 @@ The directory structure will be arranged as:
 ```
 release_model
    |- E2FGVI-CVPR22.pth
+   |- E2FGVI-HQ-CVPR22.pth
    |- i3d_rgb_imagenet.pt (for evaluating VFID metric)
    |- README.md
 ```
@@ -118,13 +127,22 @@ We provide two examples in the [`examples`](./examples) directory.
 Run the following command to enjoy them:
 ```shell
 # The first example (using split video frames)
-python test.py --video examples/tennis --mask examples/tennis_mask  --ckpt release_model/E2FGVI-CVPR22.pth
+python test.py --model e2fgvi (or e2fgvi_hq) --video examples/tennis --mask examples/tennis_mask  --ckpt release_model/E2FGVI-CVPR22.pth (or release_model/E2FGVI-HQ-CVPR22.pth)
 # The second example (using mp4 format video)
-python test.py --video examples/schoolgirls.mp4 --mask examples/schoolgirls_mask  --ckpt release_model/E2FGVI-CVPR22.pth
+python test.py --model e2fgvi (or e2fgvi_hq) --video examples/schoolgirls.mp4 --mask examples/schoolgirls_mask  --ckpt release_model/E2FGVI-CVPR22.pth (or release_model/E2FGVI-HQ-CVPR22.pth)
 ```
 The inpainting video will be saved in the `results` directory.
-
 Please prepare your own **mp4 video** (or **split frames**) and **frame-wise masks** if you want to test more cases.
+
+*Note:* E<sup>2</sup>FGVI always rescales the input video to a fixed resolution (432x240), while E<sup>2</sup>FGVI-HQ does not change the resolution of the input video. If you want to custom the output resolution, please use the `--set_size` flag and set the values of `--width` and `--height`.
+
+Example:
+```shell
+# Using this command to output a 720p video
+python test.py --model e2fgvi_hq --video <video_path> --mask <mask_path>  --ckpt release_model/E2FGVI-HQ-CVPR22.pth --set_size --width 1280 --height 720
+```
+
+
 ### Prepare dataset for training and evaluation
 <table>
 <thead>
@@ -185,22 +203,30 @@ datasets
    |- zip_file.sh
 ```
 ### Evaluation
-Run the following command for evaluation:
+Run one of the following commands for evaluation:
 ```shell
- python evaluate.py --dataset <dataset_name> --data_root datasets/ --ckpt release_model/E2FGVI-CVPR22.pth
-```
-You will get scores as paper reported.
+ # For evaluating E2FGVI model
+ python evaluate.py --model e2fgvi --dataset <dataset_name> --data_root datasets/ --ckpt release_model/E2FGVI-CVPR22.pth
+ # For evaluating E2FGVI-HQ model
+ python evaluate.py --model e2fgvi_hq --dataset <dataset_name> --data_root datasets/ --ckpt release_model/E2FGVI-HQ-CVPR22.pth
 
-The scores will also be saved in the `results/<dataset_name>` directory.
+```
+You will get scores as paper reported if you evaluate E<sup>2</sup>FGVI.
+The scores of E2FGVI-HQ can be found in [[Prepare pretrained models](https://github.com/MCG-NKU/E2FGVI#prepare-pretrained-models)].
+
+The scores will also be saved in the `results/<model_name>_<dataset_name>` directory.
 
 Please `--save_results` for further [evaluating temporal warping error](https://github.com/phoenix104104/fast_blind_video_consistency#evaluation).
 
 ### Training
-Our training configures are provided in [`train_e2fgvi.json`](./configs/train_e2fgvi.json)
+Our training configures are provided in [`train_e2fgvi.json`](./configs/train_e2fgvi.json) (for E<sup>2</sup>FGVI) and [`train_e2fgvi_hq.json`](./configs/train_e2fgvi_hq.json) (for E<sup>2</sup>FGVI-HQ).
 
-Run the following command for training:
+Run one of the following commands for training:
 ```shell
+ # For training E2FGVI
  python train.py -c configs/train_e2fgvi.json
+ # For training E2FGVI-HQ
+ python train.py -c configs/train_e2fgvi_hq.json
 ```
 You could run the same command if you want to resume your training.
 

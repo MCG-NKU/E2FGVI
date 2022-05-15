@@ -12,7 +12,6 @@ from model.modules.spectral_norm import spectral_norm as _spectral_norm
 
 
 class BaseNetwork(nn.Module):
-
     def __init__(self):
         super(BaseNetwork, self).__init__()
 
@@ -33,7 +32,6 @@ class BaseNetwork(nn.Module):
         init_type: normal | xavier | kaiming | orthogonal
         https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/9451e70673400885567d08a9e97ade2524c700d0/models/networks.py#L39
         '''
-
         def init_func(m):
             classname = m.__class__.__name__
             if classname.find('InstanceNorm2d') != -1:
@@ -71,7 +69,6 @@ class BaseNetwork(nn.Module):
 
 
 class Encoder(nn.Module):
-
     def __init__(self):
         super(Encoder, self).__init__()
         self.group = [1, 2, 4, 8, 1]
@@ -114,7 +111,6 @@ class Encoder(nn.Module):
 
 
 class deconv(nn.Module):
-
     def __init__(self,
                  input_channel,
                  output_channel,
@@ -136,7 +132,6 @@ class deconv(nn.Module):
 
 
 class InpaintGenerator(BaseNetwork):
-
     def __init__(self, init_weights=True):
         super(InpaintGenerator, self).__init__()
         channel = 256
@@ -274,36 +269,66 @@ class InpaintGenerator(BaseNetwork):
 
 
 class Discriminator(BaseNetwork):
-    def __init__(self, in_channels=3, use_sigmoid=False, use_spectral_norm=True, init_weights=True):
+    def __init__(self,
+                 in_channels=3,
+                 use_sigmoid=False,
+                 use_spectral_norm=True,
+                 init_weights=True):
         super(Discriminator, self).__init__()
         self.use_sigmoid = use_sigmoid
         nf = 32
 
         self.conv = nn.Sequential(
             spectral_norm(
-                nn.Conv3d(in_channels=in_channels, out_channels=nf * 1, kernel_size=(3, 5, 5), stride=(1, 2, 2),
-                          padding=1, bias=not use_spectral_norm), use_spectral_norm),
+                nn.Conv3d(in_channels=in_channels,
+                          out_channels=nf * 1,
+                          kernel_size=(3, 5, 5),
+                          stride=(1, 2, 2),
+                          padding=1,
+                          bias=not use_spectral_norm), use_spectral_norm),
             # nn.InstanceNorm2d(64, track_running_stats=False),
             nn.LeakyReLU(0.2, inplace=True),
-            spectral_norm(nn.Conv3d(nf * 1, nf * 2, kernel_size=(3, 5, 5), stride=(1, 2, 2),
-                                    padding=(1, 2, 2), bias=not use_spectral_norm), use_spectral_norm),
+            spectral_norm(
+                nn.Conv3d(nf * 1,
+                          nf * 2,
+                          kernel_size=(3, 5, 5),
+                          stride=(1, 2, 2),
+                          padding=(1, 2, 2),
+                          bias=not use_spectral_norm), use_spectral_norm),
             # nn.InstanceNorm2d(128, track_running_stats=False),
             nn.LeakyReLU(0.2, inplace=True),
-            spectral_norm(nn.Conv3d(nf * 2, nf * 4, kernel_size=(3, 5, 5), stride=(1, 2, 2),
-                                    padding=(1, 2, 2), bias=not use_spectral_norm), use_spectral_norm),
+            spectral_norm(
+                nn.Conv3d(nf * 2,
+                          nf * 4,
+                          kernel_size=(3, 5, 5),
+                          stride=(1, 2, 2),
+                          padding=(1, 2, 2),
+                          bias=not use_spectral_norm), use_spectral_norm),
             # nn.InstanceNorm2d(256, track_running_stats=False),
             nn.LeakyReLU(0.2, inplace=True),
-            spectral_norm(nn.Conv3d(nf * 4, nf * 4, kernel_size=(3, 5, 5), stride=(1, 2, 2),
-                                    padding=(1, 2, 2), bias=not use_spectral_norm), use_spectral_norm),
+            spectral_norm(
+                nn.Conv3d(nf * 4,
+                          nf * 4,
+                          kernel_size=(3, 5, 5),
+                          stride=(1, 2, 2),
+                          padding=(1, 2, 2),
+                          bias=not use_spectral_norm), use_spectral_norm),
             # nn.InstanceNorm2d(256, track_running_stats=False),
             nn.LeakyReLU(0.2, inplace=True),
-            spectral_norm(nn.Conv3d(nf * 4, nf * 4, kernel_size=(3, 5, 5), stride=(1, 2, 2),
-                                    padding=(1, 2, 2), bias=not use_spectral_norm), use_spectral_norm),
+            spectral_norm(
+                nn.Conv3d(nf * 4,
+                          nf * 4,
+                          kernel_size=(3, 5, 5),
+                          stride=(1, 2, 2),
+                          padding=(1, 2, 2),
+                          bias=not use_spectral_norm), use_spectral_norm),
             # nn.InstanceNorm2d(256, track_running_stats=False),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv3d(nf * 4, nf * 4, kernel_size=(3, 5, 5),
-                      stride=(1, 2, 2), padding=(1, 2, 2))
-        )
+            nn.Conv3d(nf * 4,
+                      nf * 4,
+                      kernel_size=(3, 5, 5),
+                      stride=(1, 2, 2),
+                      padding=(1, 2, 2)))
 
         if init_weights:
             self.init_weights()

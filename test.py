@@ -12,7 +12,6 @@ import torch
 
 from core.utils import to_tensors
 
-
 parser = argparse.ArgumentParser(description="E2FGVI")
 parser.add_argument("-v", "--video", type=str, required=True)
 parser.add_argument("-c", "--ckpt", type=str, required=True)
@@ -36,7 +35,7 @@ neighbor_stride = args.neighbor_stride
 default_fps = args.savefps
 
 
-# sample reference frames from the whole video 
+# sample reference frames from the whole video
 def get_ref_index(f, neighbor_ids, length):
     ref_index = []
     if num_ref == -1:
@@ -64,8 +63,9 @@ def read_mask(mpath, size):
         m = m.resize(size, Image.NEAREST)
         m = np.array(m.convert('L'))
         m = np.array(m > 0).astype(np.uint8)
-        m = cv2.dilate(m, cv2.getStructuringElement(
-            cv2.MORPH_CROSS, (3, 3)), iterations=4)
+        m = cv2.dilate(m,
+                       cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3)),
+                       iterations=4)
         masks.append(Image.fromarray(m * 255))
     return masks
 
@@ -188,7 +188,7 @@ def main_worker():
     if not os.path.exists(save_dir_name):
         os.makedirs(save_dir_name)
     save_path = os.path.join(save_dir_name, save_name)
-    
+
     writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*"mp4v"),
                              default_fps, size)
     for f in range(video_length):
@@ -200,20 +200,26 @@ def main_worker():
     # show results
     print('Let us enjoy the result!')
     fig = plt.figure('Let us enjoy the result')
-    ax1 = fig.add_subplot(1,2,1)
-    ax1.axis('off'); ax1.set_title('Original Video')
-    ax2 = fig.add_subplot(1,2,2)
-    ax2.axis('off'); ax2.set_title('Our Result')
+    ax1 = fig.add_subplot(1, 2, 1)
+    ax1.axis('off')
+    ax1.set_title('Original Video')
+    ax2 = fig.add_subplot(1, 2, 2)
+    ax2.axis('off')
+    ax2.set_title('Our Result')
     imdata1 = ax1.imshow(frames[0])
     imdata2 = ax2.imshow(comp_frames[0].astype(np.uint8))
 
     def update(idx):
         imdata1.set_data(frames[idx])
         imdata2.set_data(comp_frames[idx].astype(np.uint8))
-    
+
     fig.tight_layout()
-    anim = animation.FuncAnimation(fig, update, frames=len(frames), interval=50)
+    anim = animation.FuncAnimation(fig,
+                                   update,
+                                   frames=len(frames),
+                                   interval=50)
     plt.show()
+
 
 if __name__ == '__main__':
     main_worker()

@@ -9,11 +9,9 @@ import numpy as np
 import torch
 import torchvision.transforms as transforms
 
-from core.utils import (
-    TrainZipReader, TestZipReader,
-    create_random_shape_with_random_motion,
-    Stack, ToTorchFormatTensor, GroupRandomHorizontalFlip
-)
+from core.utils import (TrainZipReader, TestZipReader,
+                        create_random_shape_with_random_motion, Stack,
+                        ToTorchFormatTensor, GroupRandomHorizontalFlip)
 
 
 class TrainDataset(torch.utils.data.Dataset):
@@ -32,7 +30,8 @@ class TrainDataset(torch.utils.data.Dataset):
 
         self._to_tensors = transforms.Compose([
             Stack(),
-            ToTorchFormatTensor(), ])
+            ToTorchFormatTensor(),
+        ])
 
     def __len__(self):
         return len(self.video_names)
@@ -43,8 +42,8 @@ class TrainDataset(torch.utils.data.Dataset):
 
     def _sample_index(self, length, sample_length, num_ref_frame=3):
         complete_idx_set = list(range(length))
-        pivot = random.randint(0, length-sample_length)
-        local_idx = complete_idx_set[pivot: pivot+sample_length]
+        pivot = random.randint(0, length - sample_length)
+        local_idx = complete_idx_set[pivot:pivot + sample_length]
         remain_idx = list(set(complete_idx_set) - set(local_idx))
         ref_index = sorted(random.sample(remain_idx, num_ref_frame))
 
@@ -57,16 +56,17 @@ class TrainDataset(torch.utils.data.Dataset):
             self.video_dict[video_name], imageHeight=self.h, imageWidth=self.w)
 
         # create sample index
-        selected_index = self._sample_index(
-            self.video_dict[video_name], self.num_local_frames, self.num_ref_frames)
+        selected_index = self._sample_index(self.video_dict[video_name],
+                                            self.num_local_frames,
+                                            self.num_ref_frames)
 
         # read video frames
         frames = []
         masks = []
         for idx in selected_index:
-            video_path = os.path.join(
-                self.args['data_root'], self.args['name'],
-                'JPEGImages', f'{video_name}.zip')
+            video_path = os.path.join(self.args['data_root'],
+                                      self.args['name'], 'JPEGImages',
+                                      f'{video_name}.zip')
             img = TrainZipReader.imread(video_path, idx).convert('RGB')
             img = img.resize(self.size)
             frames.append(img)
@@ -84,13 +84,15 @@ class TestDataset(torch.utils.data.Dataset):
         self.args = args
         self.size = self.w, self.h = args.size
 
-        with open(os.path.join(args.data_root, args.dataset, 'test.json'), 'r') as f:
+        with open(os.path.join(args.data_root, args.dataset, 'test.json'),
+                  'r') as f:
             self.video_dict = json.load(f)
         self.video_names = list(self.video_dict.keys())
 
         self._to_tensors = transforms.Compose([
             Stack(),
-            ToTorchFormatTensor(), ])
+            ToTorchFormatTensor(),
+        ])
 
     def __len__(self):
         return len(self.video_names)
@@ -107,21 +109,22 @@ class TestDataset(torch.utils.data.Dataset):
         frames = []
         masks = []
         for idx in ref_index:
-            video_path = os.path.join(
-                self.args.data_root, self.args.dataset,
-                'JPEGImages', f'{video_name}.zip')
+            video_path = os.path.join(self.args.data_root, self.args.dataset,
+                                      'JPEGImages', f'{video_name}.zip')
             img = TestZipReader.imread(video_path, idx).convert('RGB')
             img = img.resize(self.size)
             frames.append(img)
-            mask_path = os.path.join(
-                self.args.data_root, self.args.dataset,
-                'test_masks', video_name, str(idx).zfill(5)+'.png')
-            mask = Image.open(mask_path).resize(self.size, Image.NEAREST).convert('L')
+            mask_path = os.path.join(self.args.data_root, self.args.dataset,
+                                     'test_masks', video_name,
+                                     str(idx).zfill(5) + '.png')
+            mask = Image.open(mask_path).resize(self.size,
+                                                Image.NEAREST).convert('L')
             # origin: 0 indicates missing. now: 1 indicates missing
             mask = np.asarray(mask)
             m = np.array(mask > 0).astype(np.uint8)
-            m = cv2.dilate(m, cv2.getStructuringElement(
-                cv2.MORPH_CROSS, (3, 3)), iterations=4)
+            m = cv2.dilate(m,
+                           cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3)),
+                           iterations=4)
             mask = Image.fromarray(m * 255)
             masks.append(mask)
 
