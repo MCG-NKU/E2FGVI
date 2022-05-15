@@ -19,7 +19,8 @@ This repository contains the official implementation of the following paper:
 You can try our colab demo here: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/12rwY2gtG8jVWlNx9pjmmM8uGmh5ue18G?usp=sharing)
 
 ## :star: News
-- *2022.05.15:* We release E<sup>2</sup>FGVI-HQ, which can handle videos with **arbitrary resolution**. This model could generalize well to much higher resolutions, while it only used 432x240 videos for training. Besides, it performs **better** than our original model on both PSNR and SSIM metrics. :link: Download link: [[Google Drive](https://drive.google.com/file/d/10wGdKSUOie0XmCr8SQ2A2FeDe-mfn5w3/view?usp=sharing)] [[Baidu Disk](https://pan.baidu.com/s/1jfm1oFU1eIy-IRfuHP8YXw?pwd=ssb3)].
+- *2022.05.15:* We release E<sup>2</sup>FGVI-HQ, which can handle videos with **arbitrary resolution**. This model could generalize well to much higher resolutions, while it only used 432x240 videos for training. Besides, it performs **better** than our original model on both PSNR and SSIM metrics. 
+:link: Download links: [[Google Drive](https://drive.google.com/file/d/10wGdKSUOie0XmCr8SQ2A2FeDe-mfn5w3/view?usp=sharing)] [[Baidu Disk](https://pan.baidu.com/s/1jfm1oFU1eIy-IRfuHP8YXw?pwd=ssb3)] :movie_camera: Demo video: [[Youtube](https://www.youtube.com/watch?v=N--qC3T2wc4)] [[B站](https://www.bilibili.com/video/BV1QY4y1r7TX?spm_id_from=333.999.0.0)]
 
 - *2022.04.06:* Our code is publicly available.
 ## Demo
@@ -105,10 +106,36 @@ methods.
 ### Prepare pretrained models
 Before performing the following steps, please download our pretrained model first.
 
-:link: **Download Links:** 
-[[Google Drive](https://drive.google.com/file/d/1tNJMTJ2gmWdIXJoHVi5-H504uImUiJW9/view?usp=sharing)] [[Baidu Disk](https://pan.baidu.com/s/1qXAErbilY_n_Fh9KB8UF7w?pwd=lsjw)]
-
-
+<table>
+<thead>
+  <tr>
+    <th>Model</th>
+    <th>:link: Download Links </th>
+    <th>Support Arbitrary Resolution ?</th>
+    <th> PSNR / SSIM / VFID (DAVIS) </th>
+  </tr>
+</thead>
+<tbody>
+  <tr>
+    <td>E<sup>2</sup>FGVI</td>
+    <th>
+       [<a href="https://drive.google.com/file/d/1tNJMTJ2gmWdIXJoHVi5-H504uImUiJW9/view?usp=sharing">Google Drive</a>] 
+       [<a href="https://pan.baidu.com/s/1qXAErbilY_n_Fh9KB8UF7w?pwd=lsjw">Baidu Disk</a>]
+    </th>
+    <th>:x:</th>
+    <th>33.01 / 0.9721 / 0.116</th>
+  </tr>
+  <tr>
+    <td>E<sup>2</sup>FGVI-HQ</td>
+    <th>
+       [<a href="https://drive.google.com/file/d/10wGdKSUOie0XmCr8SQ2A2FeDe-mfn5w3/view?usp=sharing">Google Drive</a>] 
+       [<a href="https://pan.baidu.com/s/1jfm1oFU1eIy-IRfuHP8YXw?pwd=ssb3">Baidu Disk</a>]
+    </th>
+    <th>:o:</th>
+    <th>33.06 / 0.9722 / 0.117</th>
+  </tr>
+</tbody>
+</table>
 
 Then, unzip the file and place the models to `release_model` directory.
 
