@@ -17,7 +17,7 @@
         "GAN_LOSS": "hinge"
     },
     "model": {
-        "net": "e2fgvi",
+        "net": "e2fgvi_hq",
         "no_dis": 0
     },
     "trainer": {

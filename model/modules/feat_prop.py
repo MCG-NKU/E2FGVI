@@ -12,7 +12,6 @@ from model.modules.flow_comp import flow_warp
 
 class SecondOrderDeformableAlignment(ModulatedDeformConv2d):
     """Second-order deformable alignment module."""
-
     def __init__(self, *args, **kwargs):
         self.max_residue_magnitude = kwargs.pop('max_residue_magnitude', 10)
 
@@ -69,11 +68,7 @@ class BidirectionalPropagation(nn.Module):
 
         for i, module in enumerate(modules):
             self.deform_align[module] = SecondOrderDeformableAlignment(
-                2 * channel,
-                channel,
-                3,
-                padding=1,
-                deform_groups=16)
+                2 * channel, channel, 3, padding=1, deform_groups=16)
 
             self.backbone[module] = nn.Sequential(
                 nn.Conv2d((2 + i) * channel, channel, 3, 1, 1),
@@ -81,7 +76,7 @@ class BidirectionalPropagation(nn.Module):
                 nn.Conv2d(channel, channel, 3, 1, 1),
             )
 
-        self.fusion = nn.Conv2d(2*channel, channel, 1, 1, 0)
+        self.fusion = nn.Conv2d(2 * channel, channel, 1, 1, 0)
 
     def forward(self, x, flows_backward, flows_forward):
         """
@@ -97,7 +92,7 @@ class BidirectionalPropagation(nn.Module):
             feats[module_name] = []
 
             frame_idx = range(0, t)
-            flow_idx = range(-1, t-1)
+            flow_idx = range(-1, t - 1)
             mapping_idx = list(range(0, len(feats['spatial'])))
             mapping_idx += mapping_idx[::-1]
 
@@ -122,12 +117,16 @@ class BidirectionalPropagation(nn.Module):
                     if i > 1:
                         feat_n2 = feats[module_name][-2]
                         flow_n2 = flows[:, flow_idx[i - 1], :, :, :]
-                        flow_n2 = flow_n1 + flow_warp(flow_n2, flow_n1.permute(0, 2, 3, 1))
-                        cond_n2 = flow_warp(feat_n2, flow_n2.permute(0, 2, 3, 1))
+                        flow_n2 = flow_n1 + flow_warp(
+                            flow_n2, flow_n1.permute(0, 2, 3, 1))
+                        cond_n2 = flow_warp(feat_n2,
+                                            flow_n2.permute(0, 2, 3, 1))
 
                     cond = torch.cat([cond_n1, feat_current, cond_n2], dim=1)
                     feat_prop = torch.cat([feat_prop, feat_n2], dim=1)
-                    feat_prop = self.deform_align[module_name](feat_prop, cond, flow_n1, flow_n2)
+                    feat_prop = self.deform_align[module_name](feat_prop, cond,
+                                                               flow_n1,
+                                                               flow_n2)
 
                 feat = [feat_current] + [
                     feats[k][idx]

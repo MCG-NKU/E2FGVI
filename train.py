@@ -14,9 +14,11 @@ from core.dist import (
     get_master_ip,
 )
 
-
 parser = argparse.ArgumentParser(description='E2FGVI')
-parser.add_argument('-c', '--config', default='configs/train_e2fgvi.json', type=str)
+parser.add_argument('-c',
+                    '--config',
+                    default='configs/train_e2fgvi.json',
+                    type=str)
 parser.add_argument('-p', '--port', default='23455', type=str)
 args = parser.parse_args()
 
@@ -30,16 +32,19 @@ def main_worker(rank, config):
                                              init_method=config['init_method'],
                                              world_size=config['world_size'],
                                              rank=config['global_rank'],
-                                             group_name='mtorch'
-                                             )
-        print('using GPU {}-{} for training'.format(
-            int(config['global_rank']), int(config['local_rank'])))
+                                             group_name='mtorch')
+        print('using GPU {}-{} for training'.format(int(config['global_rank']),
+                                                    int(config['local_rank'])))
 
-    config['save_dir'] = os.path.join(config['save_dir'], '{}_{}'.format(config['model']['net'],
-                                                                         os.path.basename(args.config).split('.')[0]))
+    config['save_dir'] = os.path.join(
+        config['save_dir'],
+        '{}_{}'.format(config['model']['net'],
+                       os.path.basename(args.config).split('.')[0]))
 
-    config['save_metric_dir'] = os.path.join('./scores', '{}_{}'.format(config['model']['net'],
-                                                                         os.path.basename(args.config).split('.')[0]))
+    config['save_metric_dir'] = os.path.join(
+        './scores',
+        '{}_{}'.format(config['model']['net'],
+                       os.path.basename(args.config).split('.')[0]))
 
     if torch.cuda.is_available():
         config['device'] = torch.device("cuda:{}".format(config['local_rank']))
@@ -49,8 +54,8 @@ def main_worker(rank, config):
     if (not config['distributed']) or config['global_rank'] == 0:
         os.makedirs(config['save_dir'], exist_ok=True)
         os.makedirs(config['save_metric_dir'], exist_ok=True)
-        config_path = os.path.join(
-            config['save_dir'], args.config.split('/')[-1])
+        config_path = os.path.join(config['save_dir'],
+                                   args.config.split('/')[-1])
         if not os.path.isfile(config_path):
             copyfile(args.config, config_path)
         print('[**] create folder {}'.format(config['save_dir']))
@@ -76,7 +81,7 @@ if __name__ == "__main__":
     # setup distributed parallel training environments
     if get_master_ip() == "127.0.0.1":
         # manually launch distributed processes
-        mp.spawn(main_worker, nprocs=config['world_size'], args=(config,))
+        mp.spawn(main_worker, nprocs=config['world_size'], args=(config, ))
     else:
         # multiple processes have been launched by openmpi
         config['local_rank'] = get_local_rank()
