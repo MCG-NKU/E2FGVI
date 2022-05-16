@@ -7,8 +7,10 @@ class AdversarialLoss(nn.Module):
     Adversarial loss
     https://arxiv.org/abs/1711.10337
     """
-
-    def __init__(self, type='nsgan', target_real_label=1.0, target_fake_label=0.0):
+    def __init__(self,
+                 type='nsgan',
+                 target_real_label=1.0,
+                 target_fake_label=0.0):
         r"""
         type = nsgan | lsgan | hinge
         """
@@ -33,7 +35,7 @@ class AdversarialLoss(nn.Module):
             else:
                 return (-outputs).mean()
         else:
-            labels = (self.real_label if is_real else self.fake_label).expand_as(
-                outputs)
+            labels = (self.real_label
+                      if is_real else self.fake_label).expand_as(outputs)
             loss = self.criterion(outputs, labels)
             return loss

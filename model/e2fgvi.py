@@ -21,8 +21,10 @@ class BaseNetwork(nn.Module):
         num_params = 0
         for param in self.parameters():
             num_params += param.numel()
-        print('Network [%s] was created. Total number of parameters: %.1f million. '
-              'To see the architecture, do print(network).' % (type(self).__name__, num_params / 1000000))
+        print(
+            'Network [%s] was created. Total number of parameters: %.1f million. '
+            'To see the architecture, do print(network).' %
+            (type(self).__name__, num_params / 1000000))
 
     def init_weights(self, init_type='normal', gain=0.02):
         '''
@@ -30,7 +32,6 @@ class BaseNetwork(nn.Module):
         init_type: normal | xavier | kaiming | orthogonal
         https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/9451e70673400885567d08a9e97ade2524c700d0/models/networks.py#L39
         '''
-
         def init_func(m):
             classname = m.__class__.__name__
             if classname.find('InstanceNorm2d') != -1:
@@ -38,7 +39,8 @@ class BaseNetwork(nn.Module):
                     nn.init.constant_(m.weight.data, 1.0)
                 if hasattr(m, 'bias') and m.bias is not None:
                     nn.init.constant_(m.bias.data, 0.0)
-            elif hasattr(m, 'weight') and (classname.find('Conv') != -1 or classname.find('Linear') != -1):
+            elif hasattr(m, 'weight') and (classname.find('Conv') != -1
+                                           or classname.find('Linear') != -1):
                 if init_type == 'normal':
                     nn.init.normal_(m.weight.data, 0.0, gain)
                 elif init_type == 'xavier':
@@ -53,7 +55,8 @@ class BaseNetwork(nn.Module):
                     m.reset_parameters()
                 else:
                     raise NotImplementedError(
-                        'initialization method [%s] is not implemented' % init_type)
+                        'initialization method [%s] is not implemented' %
+                        init_type)
                 if hasattr(m, 'bias') and m.bias is not None:
                     nn.init.constant_(m.bias.data, 0.0)
 
@@ -92,7 +95,7 @@ class Encoder(nn.Module):
 
     def forward(self, x):
         bt, c, h, w = x.size()
-        h, w = h//4, w//4
+        h, w = h // 4, w // 4
         out = x
         for i, layer in enumerate(self.layers):
             if i == 8:
@@ -107,13 +110,22 @@ class Encoder(nn.Module):
 
 
 class deconv(nn.Module):
-    def __init__(self, input_channel, output_channel, kernel_size=3, padding=0):
+    def __init__(self,
+                 input_channel,
+                 output_channel,
+                 kernel_size=3,
+                 padding=0):
         super().__init__()
-        self.conv = nn.Conv2d(input_channel, output_channel,
-                              kernel_size=kernel_size, stride=1, padding=padding)
+        self.conv = nn.Conv2d(input_channel,
+                              output_channel,
+                              kernel_size=kernel_size,
+                              stride=1,
+                              padding=padding)
 
     def forward(self, x):
-        x = F.interpolate(x, scale_factor=2, mode='bilinear',
+        x = F.interpolate(x,
+                          scale_factor=2,
+                          mode='bilinear',
                           align_corners=True)
         return self.conv(x)
 
@@ -135,8 +147,7 @@ class InpaintGenerator(BaseNetwork):
             nn.LeakyReLU(0.2, inplace=True),
             deconv(64, 64, kernel_size=3, padding=1),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(64, 3, kernel_size=3, stride=1, padding=1)
-        )
+            nn.Conv2d(64, 3, kernel_size=3, stride=1, padding=1))
 
         # feature propagation module
         self.feat_prop_module = BidirectionalPropagation(channel // 2)
@@ -146,13 +157,25 @@ class InpaintGenerator(BaseNetwork):
         padding = (3, 3)
         stride = (3, 3)
         output_size = (60, 108)
-        t2t_params = {'kernel_size': kernel_size, 'stride': stride, 'padding': padding, 'output_size': output_size}
-        self.ss = SoftSplit(channel // 2, hidden, kernel_size, stride, padding, t2t_param=t2t_params)
-        self.sc = SoftComp(channel // 2, hidden, output_size, kernel_size, stride, padding)
+        t2t_params = {
+            'kernel_size': kernel_size,
+            'stride': stride,
+            'padding': padding,
+            'output_size': output_size
+        }
+        self.ss = SoftSplit(channel // 2,
+                            hidden,
+                            kernel_size,
+                            stride,
+                            padding,
+                            t2t_param=t2t_params)
+        self.sc = SoftComp(channel // 2, hidden, output_size, kernel_size,
+                           stride, padding)
 
         n_vecs = 1
         for i, d in enumerate(kernel_size):
-            n_vecs *= int((output_size[i] + 2 * padding[i] - (d - 1) - 1) / stride[i] + 1)
+            n_vecs *= int((output_size[i] + 2 * padding[i] -
+                           (d - 1) - 1) / stride[i] + 1)
 
         blocks = []
         depths = 8
@@ -163,11 +186,15 @@ class InpaintGenerator(BaseNetwork):
         pool_method = "fc"
 
         for i in range(depths):
-            blocks.append(TemporalFocalTransformerBlock(
-                dim=hidden, num_heads=num_heads[i], window_size=window_size[i],
-                focal_level=focal_levels[i], focal_window=focal_windows[i],
-                n_vecs=n_vecs, t2t_params=t2t_params, pool_method=pool_method
-            ))
+            blocks.append(
+                TemporalFocalTransformerBlock(dim=hidden,
+                                              num_heads=num_heads[i],
+                                              window_size=window_size[i],
+                                              focal_level=focal_levels[i],
+                                              focal_window=focal_windows[i],
+                                              n_vecs=n_vecs,
+                                              t2t_params=t2t_params,
+                                              pool_method=pool_method))
         self.transformer = nn.Sequential(*blocks)
 
         if init_weights:
@@ -184,17 +211,25 @@ class InpaintGenerator(BaseNetwork):
         b, l_t, c, h, w = masked_local_frames.size()
 
         # compute forward and backward flows of masked frames
-        masked_local_frames = F.interpolate(masked_local_frames.view(-1, c, h, w),
-                                            scale_factor=1/4, mode='bilinear',
-                                            align_corners=True, recompute_scale_factor=True)
-        masked_local_frames = masked_local_frames.view(b, l_t, c, h//4, w//4)
-        mlf_1 = masked_local_frames[:, :-1, :, :, :].reshape(-1, c, h//4, w//4)
-        mlf_2 = masked_local_frames[:, 1:, :, :, :].reshape(-1, c, h//4, w//4)
+        masked_local_frames = F.interpolate(masked_local_frames.view(
+            -1, c, h, w),
+                                            scale_factor=1 / 4,
+                                            mode='bilinear',
+                                            align_corners=True,
+                                            recompute_scale_factor=True)
+        masked_local_frames = masked_local_frames.view(b, l_t, c, h // 4,
+                                                       w // 4)
+        mlf_1 = masked_local_frames[:, :-1, :, :, :].reshape(
+            -1, c, h // 4, w // 4)
+        mlf_2 = masked_local_frames[:, 1:, :, :, :].reshape(
+            -1, c, h // 4, w // 4)
         pred_flows_forward = self.update_spynet(mlf_1, mlf_2)
         pred_flows_backward = self.update_spynet(mlf_2, mlf_1)
 
-        pred_flows_forward = pred_flows_forward.view(b, l_t - 1, 2, h//4, w//4)
-        pred_flows_backward = pred_flows_backward.view(b, l_t - 1, 2, h//4, w//4)
+        pred_flows_forward = pred_flows_forward.view(b, l_t - 1, 2, h // 4,
+                                                     w // 4)
+        pred_flows_backward = pred_flows_backward.view(b, l_t - 1, 2, h // 4,
+                                                       w // 4)
 
         return pred_flows_forward, pred_flows_backward
 
@@ -211,7 +246,8 @@ class InpaintGenerator(BaseNetwork):
         _, c, h, w = enc_feat.size()
         local_feat = enc_feat.view(b, t, c, h, w)[:, :l_t, ...]
         ref_feat = enc_feat.view(b, t, c, h, w)[:, l_t:, ...]
-        local_feat = self.feat_prop_module(local_feat, pred_flows[0], pred_flows[1])
+        local_feat = self.feat_prop_module(local_feat, pred_flows[0],
+                                           pred_flows[1])
         enc_feat = torch.cat((local_feat, ref_feat), dim=1)
 
         # content hallucination through stacking multiple temporal focal transformer blocks
@@ -222,7 +258,7 @@ class InpaintGenerator(BaseNetwork):
         enc_feat = enc_feat + trans_feat
 
         # decode frames from features
-        output = self.decoder(enc_feat.view(b*t, c, h, w))
+        output = self.decoder(enc_feat.view(b * t, c, h, w))
         output = torch.tanh(output)
         return output, pred_flows
 
@@ -233,36 +269,66 @@ class InpaintGenerator(BaseNetwork):
 
 
 class Discriminator(BaseNetwork):
-    def __init__(self, in_channels=3, use_sigmoid=False, use_spectral_norm=True, init_weights=True):
+    def __init__(self,
+                 in_channels=3,
+                 use_sigmoid=False,
+                 use_spectral_norm=True,
+                 init_weights=True):
         super(Discriminator, self).__init__()
         self.use_sigmoid = use_sigmoid
         nf = 32
 
         self.conv = nn.Sequential(
             spectral_norm(
-                nn.Conv3d(in_channels=in_channels, out_channels=nf * 1, kernel_size=(3, 5, 5), stride=(1, 2, 2),
-                          padding=1, bias=not use_spectral_norm), use_spectral_norm),
+                nn.Conv3d(in_channels=in_channels,
+                          out_channels=nf * 1,
+                          kernel_size=(3, 5, 5),
+                          stride=(1, 2, 2),
+                          padding=1,
+                          bias=not use_spectral_norm), use_spectral_norm),
             # nn.InstanceNorm2d(64, track_running_stats=False),
             nn.LeakyReLU(0.2, inplace=True),
-            spectral_norm(nn.Conv3d(nf * 1, nf * 2, kernel_size=(3, 5, 5), stride=(1, 2, 2),
-                                    padding=(1, 2, 2), bias=not use_spectral_norm), use_spectral_norm),
+            spectral_norm(
+                nn.Conv3d(nf * 1,
+                          nf * 2,
+                          kernel_size=(3, 5, 5),
+                          stride=(1, 2, 2),
+                          padding=(1, 2, 2),
+                          bias=not use_spectral_norm), use_spectral_norm),
             # nn.InstanceNorm2d(128, track_running_stats=False),
             nn.LeakyReLU(0.2, inplace=True),
-            spectral_norm(nn.Conv3d(nf * 2, nf * 4, kernel_size=(3, 5, 5), stride=(1, 2, 2),
-                                    padding=(1, 2, 2), bias=not use_spectral_norm), use_spectral_norm),
+            spectral_norm(
+                nn.Conv3d(nf * 2,
+                          nf * 4,
+                          kernel_size=(3, 5, 5),
+                          stride=(1, 2, 2),
+                          padding=(1, 2, 2),
+                          bias=not use_spectral_norm), use_spectral_norm),
             # nn.InstanceNorm2d(256, track_running_stats=False),
             nn.LeakyReLU(0.2, inplace=True),
-            spectral_norm(nn.Conv3d(nf * 4, nf * 4, kernel_size=(3, 5, 5), stride=(1, 2, 2),
-                                    padding=(1, 2, 2), bias=not use_spectral_norm), use_spectral_norm),
+            spectral_norm(
+                nn.Conv3d(nf * 4,
+                          nf * 4,
+                          kernel_size=(3, 5, 5),
+                          stride=(1, 2, 2),
+                          padding=(1, 2, 2),
+                          bias=not use_spectral_norm), use_spectral_norm),
             # nn.InstanceNorm2d(256, track_running_stats=False),
             nn.LeakyReLU(0.2, inplace=True),
-            spectral_norm(nn.Conv3d(nf * 4, nf * 4, kernel_size=(3, 5, 5), stride=(1, 2, 2),
-                                    padding=(1, 2, 2), bias=not use_spectral_norm), use_spectral_norm),
+            spectral_norm(
+                nn.Conv3d(nf * 4,
+                          nf * 4,
+                          kernel_size=(3, 5, 5),
+                          stride=(1, 2, 2),
+                          padding=(1, 2, 2),
+                          bias=not use_spectral_norm), use_spectral_norm),
             # nn.InstanceNorm2d(256, track_running_stats=False),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv3d(nf * 4, nf * 4, kernel_size=(3, 5, 5),
-                      stride=(1, 2, 2), padding=(1, 2, 2))
-        )
+            nn.Conv3d(nf * 4,
+                      nf * 4,
+                      kernel_size=(3, 5, 5),
+                      stride=(1, 2, 2),
+                      padding=(1, 2, 2)))
 
         if init_weights:
             self.init_weights()
