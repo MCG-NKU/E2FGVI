@@ -9,7 +9,6 @@ This repository contains the official implementation of the following paper:
 > **Towards An End-to-End Framework for Flow-Guided Video Inpainting**<br>
 > Zhen Li<sup>#</sup>, Cheng-Ze Lu<sup>#</sup>, Jianhua Qin, Chun-Le Guo<sup>*</sup>, Ming-Ming Cheng<br>
 > IEEE/CVF Conference on Computer Vision and Pattern Recognition (**CVPR**), 2022<br>
-https://www.bilibili.com/video/BV1Ta411n7eH?spm_id_from=333.999.0.0
 
 [[Paper](https://arxiv.org/abs/2204.02663)]
 [[Demo Video (Youtube)](https://www.youtube.com/watch?v=N--qC3T2wc4)]
