@@ -5,6 +5,8 @@
 ![Python 3.7](https://img.shields.io/badge/python-3.7-green.svg?style=plastic)
 ![pytorch 1.6.0](https://img.shields.io/badge/pytorch-1.5.1-green.svg?style=plastic)
 
+English | [简体中文](README_zh-CN.md)
+
 This repository contains the official implementation of the following paper:
 > **Towards An End-to-End Framework for Flow-Guided Video Inpainting**<br>
 > Zhen Li<sup>#</sup>, Cheng-Ze Lu<sup>#</sup>, Jianhua Qin, Chun-Le Guo<sup>*</sup>, Ming-Ming Cheng<br>
@@ -239,7 +241,7 @@ Run one of the following commands for evaluation:
 
 ```
 You will get scores as paper reported if you evaluate E<sup>2</sup>FGVI.
-The scores of E2FGVI-HQ can be found in [[Prepare pretrained models](https://github.com/MCG-NKU/E2FGVI#prepare-pretrained-models)].
+The scores of E<sup>2</sup>FGVI-HQ can be found in [[Prepare pretrained models](https://github.com/MCG-NKU/E2FGVI#prepare-pretrained-models)].
 
 The scores will also be saved in the `results/<model_name>_<dataset_name>` directory.
 
