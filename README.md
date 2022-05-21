@@ -11,6 +11,7 @@ This repository contains the official implementation of the following paper:
 > IEEE/CVF Conference on Computer Vision and Pattern Recognition (**CVPR**), 2022<br>
 
 [[Paper](https://arxiv.org/abs/2204.02663)]
+[[README-简体中文](README_zh-CN.md)]
 [[Demo Video (Youtube)](https://www.youtube.com/watch?v=N--qC3T2wc4)]
 [[演示视频 (B站)](https://www.bilibili.com/video/BV1Ta411n7eH?spm_id_from=333.999.0.0)]
 [Project Page (TBD)]
@@ -239,7 +240,7 @@ Run one of the following commands for evaluation:
 
 ```
 You will get scores as paper reported if you evaluate E<sup>2</sup>FGVI.
-The scores of E2FGVI-HQ can be found in [[Prepare pretrained models](https://github.com/MCG-NKU/E2FGVI#prepare-pretrained-models)].
+The scores of E<sup>2</sup>FGVI-HQ can be found in [[Prepare pretrained models](https://github.com/MCG-NKU/E2FGVI#prepare-pretrained-models)].
 
 The scores will also be saved in the `results/<model_name>_<dataset_name>` directory.
 
