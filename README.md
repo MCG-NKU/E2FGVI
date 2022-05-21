@@ -12,7 +12,7 @@ This repository contains the official implementation of the following paper:
 
 [[Paper](https://arxiv.org/abs/2204.02663)]
 [[Demo Video (Youtube)](https://www.youtube.com/watch?v=N--qC3T2wc4)]
-[[演示视频 (B站)](https://www.bilibili.com/video/BV1QY4y1r7TX?spm_id_from=333.999.0.0)]
+[[演示视频 (B站)](https://www.bilibili.com/video/BV1Ta411n7eH?spm_id_from=333.999.0.0)]
 [Project Page (TBD)]
 [Poster (TBD)]
 
@@ -20,7 +20,7 @@ You can try our colab demo here: [![Open In Colab](https://colab.research.google
 
 ## :star: News
 - *2022.05.15:* We release E<sup>2</sup>FGVI-HQ, which can handle videos with **arbitrary resolution**. This model could generalize well to much higher resolutions, while it only used 432x240 videos for training. Besides, it performs **better** than our original model on both PSNR and SSIM metrics. 
-:link: Download links: [[Google Drive](https://drive.google.com/file/d/10wGdKSUOie0XmCr8SQ2A2FeDe-mfn5w3/view?usp=sharing)] [[Baidu Disk](https://pan.baidu.com/s/1jfm1oFU1eIy-IRfuHP8YXw?pwd=ssb3)] :movie_camera: Demo video: [[Youtube](https://www.youtube.com/watch?v=N--qC3T2wc4)] [[B站](https://www.bilibili.com/video/BV1QY4y1r7TX?spm_id_from=333.999.0.0)]
+:link: Download links: [[Google Drive](https://drive.google.com/file/d/10wGdKSUOie0XmCr8SQ2A2FeDe-mfn5w3/view?usp=sharing)] [[Baidu Disk](https://pan.baidu.com/s/1jfm1oFU1eIy-IRfuHP8YXw?pwd=ssb3)] :movie_camera: Demo video: [[Youtube](https://www.youtube.com/watch?v=N--qC3T2wc4)] [[B站](https://www.bilibili.com/video/BV1Ta411n7eH?spm_id_from=333.999.0.0)]
 
 - *2022.04.06:* Our code is publicly available.
 ## Demo
