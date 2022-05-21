@@ -5,13 +5,14 @@
 ![Python 3.7](https://img.shields.io/badge/python-3.7-green.svg?style=plastic)
 ![pytorch 1.6.0](https://img.shields.io/badge/pytorch-1.5.1-green.svg?style=plastic)
 
+English | [简体中文](README_zh-CN.md)
+
 This repository contains the official implementation of the following paper:
 > **Towards An End-to-End Framework for Flow-Guided Video Inpainting**<br>
 > Zhen Li<sup>#</sup>, Cheng-Ze Lu<sup>#</sup>, Jianhua Qin, Chun-Le Guo<sup>*</sup>, Ming-Ming Cheng<br>
 > IEEE/CVF Conference on Computer Vision and Pattern Recognition (**CVPR**), 2022<br>
 
 [[Paper](https://arxiv.org/abs/2204.02663)]
-[[README-简体中文](README_zh-CN.md)]
 [[Demo Video (Youtube)](https://www.youtube.com/watch?v=N--qC3T2wc4)]
 [[演示视频 (B站)](https://www.bilibili.com/video/BV1Ta411n7eH?spm_id_from=333.999.0.0)]
 [Project Page (TBD)]
