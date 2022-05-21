@@ -5,6 +5,8 @@
 ![Python 3.7](https://img.shields.io/badge/python-3.7-green.svg?style=plastic)
 ![pytorch 1.6.0](https://img.shields.io/badge/pytorch-1.5.1-green.svg?style=plastic)
 
+[English](README.md) | 简体中文
+
 本项目包含了以下论文的官方实现：
 > **Towards An End-to-End Framework for Flow-Guided Video Inpainting**<br>
 > Zhen Li<sup>#</sup>, Cheng-Ze Lu<sup>#</sup>, Jianhua Qin, Chun-Le Guo<sup>*</sup>, Ming-Ming Cheng<br>
