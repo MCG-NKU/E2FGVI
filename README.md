@@ -94,6 +94,7 @@ methods.
 2. Create Conda Environment and Install Dependencies
 
    ```bash
+   cd E2FGVI
    conda env create -f environment.yml
    conda activate e2fgvi
    ```
