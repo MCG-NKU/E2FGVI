@@ -62,6 +62,7 @@ def read_mask(mpath, size):
         m = Image.open(os.path.join(mpath, mp))
         m = m.resize(size, Image.NEAREST)
         m = np.array(m.convert('L'))
+        # L stands for 8-bit pixels, black and white
         m = np.array(m > 0).astype(np.uint8)
         m = cv2.dilate(m,
                        cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3)),
@@ -114,6 +115,8 @@ def main_worker():
     else:
         size = None
 
+    print(size)
+
     net = importlib.import_module('model.' + args.model)
     model = net.InpaintGenerator().to(device)
     data = torch.load(args.ckpt, map_location=device)
@@ -138,7 +141,7 @@ def main_worker():
         np.expand_dims((np.array(m) != 0).astype(np.uint8), 2) for m in masks
     ]
     masks = to_tensors()(masks).unsqueeze(0)
-    imgs, masks = imgs.to(device), masks.to(device)
+    # imgs, masks = imgs.to(device), masks.to(device)
     comp_frames = [None] * video_length
 
     # completing holes by e2fgvi
@@ -148,35 +151,37 @@ def main_worker():
             i for i in range(max(0, f - neighbor_stride),
                              min(video_length, f + neighbor_stride + 1))
         ]
+        print(neighbor_ids)
         ref_ids = get_ref_index(f, neighbor_ids, video_length)
-        selected_imgs = imgs[:1, neighbor_ids + ref_ids, :, :, :]
-        selected_masks = masks[:1, neighbor_ids + ref_ids, :, :, :]
-        with torch.no_grad():
-            masked_imgs = selected_imgs * (1 - selected_masks)
-            mod_size_h = 60
-            mod_size_w = 108
-            h_pad = (mod_size_h - h % mod_size_h) % mod_size_h
-            w_pad = (mod_size_w - w % mod_size_w) % mod_size_w
-            masked_imgs = torch.cat(
-                [masked_imgs, torch.flip(masked_imgs, [3])],
-                3)[:, :, :, :h + h_pad, :]
-            masked_imgs = torch.cat(
-                [masked_imgs, torch.flip(masked_imgs, [4])],
-                4)[:, :, :, :, :w + w_pad]
-            pred_imgs, _ = model(masked_imgs, len(neighbor_ids))
-            pred_imgs = pred_imgs[:, :, :h, :w]
-            pred_imgs = (pred_imgs + 1) / 2
-            pred_imgs = pred_imgs.cpu().permute(0, 2, 3, 1).numpy() * 255
-            for i in range(len(neighbor_ids)):
-                idx = neighbor_ids[i]
-                img = np.array(pred_imgs[i]).astype(
-                    np.uint8) * binary_masks[idx] + frames[idx] * (
-                        1 - binary_masks[idx])
-                if comp_frames[idx] is None:
-                    comp_frames[idx] = img
-                else:
-                    comp_frames[idx] = comp_frames[idx].astype(
-                        np.float32) * 0.5 + img.astype(np.float32) * 0.5
+        print(ref_ids)
+        selected_imgs = imgs[:1, neighbor_ids + ref_ids, :, :, :].to(device)
+        selected_masks = masks[:1, neighbor_ids + ref_ids, :, :, :].to(device)
+
+        masked_imgs = selected_imgs * (1 - selected_masks)
+        mod_size_h = 60
+        mod_size_w = 108
+        h_pad = (mod_size_h - h % mod_size_h) % mod_size_h
+        w_pad = (mod_size_w - w % mod_size_w) % mod_size_w
+        masked_imgs = torch.cat(
+            [masked_imgs, torch.flip(masked_imgs, [3])],
+            3)[:, :, :, :h + h_pad, :]
+        masked_imgs = torch.cat(
+            [masked_imgs, torch.flip(masked_imgs, [4])],
+            4)[:, :, :, :, :w + w_pad]
+        pred_imgs, _ = model(masked_imgs, len(neighbor_ids))
+        pred_imgs = pred_imgs[:, :, :h, :w]
+        pred_imgs = (pred_imgs + 1) / 2
+        pred_imgs = pred_imgs.cpu().permute(0, 2, 3, 1).numpy() * 255
+        for i in range(len(neighbor_ids)):
+            idx = neighbor_ids[i]
+            img = np.array(pred_imgs[i]).astype(
+                np.uint8) * binary_masks[idx] + frames[idx] * (
+                    1 - binary_masks[idx])
+            if comp_frames[idx] is None:
+                comp_frames[idx] = img
+            else:
+                comp_frames[idx] = comp_frames[idx].astype(
+                    np.float32) * 0.5 + img.astype(np.float32) * 0.5
 
     # saving videos
     print('Saving videos...')
@@ -221,4 +226,5 @@ def main_worker():
 
 
 if __name__ == '__main__':
-    main_worker()
+    with torch.no_grad():
+        main_worker()
