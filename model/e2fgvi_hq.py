@@ -177,7 +177,9 @@ class InpaintGenerator(BaseNetwork):
                            (d - 1) - 1) / stride[i] + 1)
 
         blocks = []
-        depths = 8
+        depths = 8  # default
+        # depths = 4   # 0.09s/frame
+        # depths = 2   # 0.08s/frame
         num_heads = [4] * depths
         window_size = [(5, 9)] * depths
         focal_windows = [(5, 9)] * depths

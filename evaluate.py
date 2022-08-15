@@ -16,8 +16,8 @@ from core.dataset import TestDataset
 from core.metrics import calc_psnr_and_ssim, calculate_i3d_activations, calculate_vfid, init_i3d_model
 
 # global variables
-w, h = 432, 240     # default acc. and speed test setting in e2fgvi for davis dataset
-# w, h = 864, 480     # davis res
+# w, h = 432, 240     # default acc. and speed test setting in e2fgvi for davis dataset
+w, h = 864, 480     # davis res 480x854
 ref_length = 10     # non-local frames的步幅间隔，此处为每10帧取1帧NLF
 neighbor_stride = 5     # local frames的窗口大小，加上自身则窗口大小为6
 default_fps = 24
@@ -48,9 +48,9 @@ def main_worker(args):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     net = importlib.import_module('model.' + args.model)
     model = net.InpaintGenerator().to(device)
-    data = torch.load(args.ckpt, map_location=device)
-    model.load_state_dict(data)
-    print(f'Loading from: {args.ckpt}')
+    # data = torch.load(args.ckpt, map_location=device)
+    # model.load_state_dict(data)
+    # print(f'Loading from: {args.ckpt}')
     model.eval()
 
     total_frame_psnr = []
