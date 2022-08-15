@@ -13,6 +13,9 @@ from matplotlib.path import Path
 from matplotlib import pyplot as plt
 from torchvision import transforms
 
+# 解决随机mask生成的OMP Error15报错
+os.environ['KMP_DUPLICATE_LIB_OK']='True'
+
 # matplotlib.use('agg')
 
 # ###########################################################################

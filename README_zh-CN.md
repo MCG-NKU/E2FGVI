@@ -186,7 +186,7 @@ python test.py --model e2fgvi_hq --video <video_path> --mask <mask_path>  --ckpt
     <td>验证: 50 (共90)</td>
   <tr>
     <td>Images</td>
-    <td> [<a href="https://competitions.codalab.org/competitions/19544#participate-get-data">官方链接</a>] (下载全部训练测试集) </td>
+    <td> [<a href="https://competitions.codalab.org/competitions/19544#participate-get-data">官方链接</a>] (下载全部训练测试集train all frames和test all frames) </td>
     <td> [<a href="https://data.vision.ee.ethz.ch/csergi/share/davis/DAVIS-2017-trainval-480p.zip">官方链接</a>] (2017, 480p, TrainVal) </td>
   </tr>
   <tr>

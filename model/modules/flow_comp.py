@@ -13,6 +13,8 @@ class FlowCompletionLoss(nn.Module):
     def __init__(self):
         super().__init__()
         self.fix_spynet = SPyNet()
+
+        # 算GT的SpyNet锁了权重，补全光流的SpyNet没有锁权重
         for p in self.fix_spynet.parameters():
             p.requires_grad = False
 
