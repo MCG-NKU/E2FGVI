@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 import importlib
 import os
+import time
 import argparse
 from PIL import Image
 
@@ -13,7 +14,8 @@ from core.dataset import TestDataset
 from core.metrics import calc_psnr_and_ssim, calculate_i3d_activations, calculate_vfid, init_i3d_model
 
 # global variables
-w, h = 432, 240
+w, h = 432, 240     # default acc. and speed test setting in e2fgvi for davis dataset
+# w, h = 864, 480     # davis res
 ref_length = 10
 neighbor_stride = 5
 default_fps = 24
@@ -68,6 +70,10 @@ def main_worker(args):
     i3d_model = init_i3d_model()
 
     for index, items in enumerate(test_loader):
+        if args.timing:
+            torch.cuda.synchronize()
+            time_start = time.time()
+
         frames, masks, video_name, frames_PIL = items
 
         video_length = frames.size(1)
@@ -139,6 +145,13 @@ def main_worker(args):
             f'[{index+1:3}/{len(test_loader)}] Name: {str(video_name):25} | PSNR/SSIM: {cur_psnr:.4f}/{cur_ssim:.4f}\n'
         )
 
+        if args.timing:
+            torch.cuda.synchronize()
+            time_end = time.time()
+            time_sum = time_end - time_start
+            print('Average Run Time: '
+                  f'{time_sum / len(cur_video_psnr)}')
+
         # saving images for evaluating warpping errors
         if args.save_results:
             save_frame_path = os.path.join(result_path, video_name[0])
@@ -161,6 +174,8 @@ def main_worker(args):
         f'{avg_frame_psnr:.2f}/{avg_frame_ssim:.4f}/{fid_score:.3f}')
     eval_summary.close()
 
+    return len(total_frame_psnr)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='E2FGVI')
@@ -172,5 +187,18 @@ if __name__ == '__main__':
     parser.add_argument('--ckpt', type=str, required=True)
     parser.add_argument('--save_results', action='store_true', default=False)
     parser.add_argument('--num_workers', default=4, type=int)
+    parser.add_argument('--timing', action='store_true', default=False)
     args = parser.parse_args()
-    main_worker(args)
+
+    if args.timing:
+        torch.cuda.synchronize()
+        time_start = time.time()
+
+    frame_num = main_worker(args)
+
+    if args.timing:
+        torch.cuda.synchronize()
+        time_end = time.time()
+        time_sum = time_end - time_start
+        print('Finish evaluation... Average Run Time: '
+              f'{time_sum/frame_num}')
