@@ -133,8 +133,8 @@ class deconv(nn.Module):
 class InpaintGenerator(BaseNetwork):
     def __init__(self, init_weights=True):
         super(InpaintGenerator, self).__init__()
-        channel = 256
-        hidden = 512
+        channel = 256     # default
+        hidden = 512     # default
 
         # encoder
         self.encoder = Encoder()
@@ -178,7 +178,7 @@ class InpaintGenerator(BaseNetwork):
                            (d - 1) - 1) / stride[i] + 1)
 
         blocks = []
-        depths = 8
+        depths = 8    # default
         num_heads = [4] * depths
         window_size = [(5, 9)] * depths
         focal_windows = [(5, 9)] * depths

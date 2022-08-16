@@ -70,27 +70,27 @@ class BaseNetwork(nn.Module):
 
 class Encoder(nn.Module):
     # def __init__(self):     # default, out channel不会随着channel改变导致bug
-    def __init__(self, out_channel=128):
+    def __init__(self, out_channel=128, reduction=1):
         super(Encoder, self).__init__()
         self.group = [1, 2, 4, 8, 1]
         self.layers = nn.ModuleList([
-            nn.Conv2d(3, 64, kernel_size=3, stride=2, padding=1),
+            nn.Conv2d(3, 64//reduction, kernel_size=3, stride=2, padding=1),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(64//reduction, 64//reduction, kernel_size=3, stride=1, padding=1),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
+            nn.Conv2d(64//reduction, 128//reduction, kernel_size=3, stride=2, padding=1),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(128//reduction, 256//reduction, kernel_size=3, stride=1, padding=1),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(256, 384, kernel_size=3, stride=1, padding=1, groups=1),
+            nn.Conv2d(256//reduction, 384//reduction, kernel_size=3, stride=1, padding=1, groups=1),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(640, 512, kernel_size=3, stride=1, padding=1, groups=2),
+            nn.Conv2d(640//reduction, 512//reduction, kernel_size=3, stride=1, padding=1, groups=2),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(768, 384, kernel_size=3, stride=1, padding=1, groups=4),
+            nn.Conv2d(768//reduction, 384//reduction, kernel_size=3, stride=1, padding=1, groups=4),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(640, 256, kernel_size=3, stride=1, padding=1, groups=8),
+            nn.Conv2d(640//reduction, 256//reduction, kernel_size=3, stride=1, padding=1, groups=8),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(512, out_channel, kernel_size=3, stride=1, padding=1, groups=1),
+            nn.Conv2d(512//reduction, out_channel, kernel_size=3, stride=1, padding=1, groups=1),
             nn.LeakyReLU(0.2, inplace=True)
         ])
 
@@ -133,18 +133,19 @@ class deconv(nn.Module):
 
 
 class InpaintGenerator(BaseNetwork):
-    def __init__(self, init_weights=True):
+    def __init__(self, init_weights=True, flow_align=False):
         super(InpaintGenerator, self).__init__()
-        channel = 256   # default
-        hidden = 512   # default
-        # channel = 32
-        # hidden = 64
+        # channel = 256   # default
+        # hidden = 512   # default
+        channel = 64
+        hidden = 128
+        reduction = 2
 
         # encoder
         # self.encoder = Encoder()    # default
-        self.encoder = Encoder(out_channel=channel // 2)
+        self.encoder = Encoder(out_channel=channel // 2, reduction=reduction)
 
-        # decoder
+        # decoder-default
         self.decoder = nn.Sequential(
             deconv(channel // 2, 128, kernel_size=3, padding=1),
             nn.LeakyReLU(0.2, inplace=True),
@@ -154,8 +155,18 @@ class InpaintGenerator(BaseNetwork):
             nn.LeakyReLU(0.2, inplace=True),
             nn.Conv2d(64, 3, kernel_size=3, stride=1, padding=1))
 
+        # # decoder-lite
+        # self.decoder = nn.Sequential(
+        #     deconv(channel // 2, 128//reduction, kernel_size=3, padding=1),
+        #     nn.LeakyReLU(0.2, inplace=True),
+        #     nn.Conv2d(128//reduction, 64//reduction, kernel_size=3, stride=1, padding=1),
+        #     nn.LeakyReLU(0.2, inplace=True),
+        #     deconv(64//reduction, 64//reduction, kernel_size=3, padding=1),
+        #     nn.LeakyReLU(0.2, inplace=True),
+        #     nn.Conv2d(64//reduction, 3, kernel_size=3, stride=1, padding=1))
+
         # feature propagation module
-        self.feat_prop_module = BidirectionalPropagation(channel // 2)
+        self.feat_prop_module = BidirectionalPropagation(channel // 2, flow_align=flow_align)
 
         # soft split and soft composition
         kernel_size = (7, 7)
@@ -181,9 +192,9 @@ class InpaintGenerator(BaseNetwork):
                            (d - 1) - 1) / stride[i] + 1)
 
         blocks = []
-        depths = 8  # default
+        # depths = 8  # default
         # depths = 4   # 0.09s/frame
-        # depths = 2   # 0.08s/frame, 0.07s/frame with hidden = 128,
+        depths = 2   # 0.08s/frame, 0.07s/frame with hidden = 128,
         num_heads = [4] * depths
         window_size = [(5, 9)] * depths
         focal_windows = [(5, 9)] * depths
