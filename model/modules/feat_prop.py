@@ -103,11 +103,49 @@ class BidirectionalPropagation(nn.Module):
                 flows = flows_forward
 
             feat_prop = x.new_zeros(b, self.channel, h, w)
+
+            # default backward时存在i和idx不对应的bug
+            # for i, idx in enumerate(frame_idx):
+            #     feat_current = feats['spatial'][mapping_idx[idx]]
+            #
+            #     if i > 0:
+            #         flow_n1 = flows[:, flow_idx[i], :, :, :]
+            #         cond_n1 = flow_warp(feat_prop, flow_n1.permute(0, 2, 3, 1))
+            #
+            #         # initialize second-order features
+            #         feat_n2 = torch.zeros_like(feat_prop)
+            #         flow_n2 = torch.zeros_like(flow_n1)
+            #         cond_n2 = torch.zeros_like(cond_n1)
+            #         if i > 1:
+            #             feat_n2 = feats[module_name][-2]
+            #             flow_n2 = flows[:, flow_idx[i - 1], :, :, :]
+            #             flow_n2 = flow_n1 + flow_warp(
+            #                 flow_n2, flow_n1.permute(0, 2, 3, 1))
+            #             cond_n2 = flow_warp(feat_n2,
+            #                                 flow_n2.permute(0, 2, 3, 1))
+            #
+            #         cond = torch.cat([cond_n1, feat_current, cond_n2], dim=1)
+            #         feat_prop = torch.cat([feat_prop, feat_n2], dim=1)
+            #         feat_prop = self.deform_align[module_name](feat_prop, cond,
+            #                                                    flow_n1,
+            #                                                    flow_n2)
+            #
+            #     feat = [feat_current] + [
+            #         feats[k][idx]
+            #         for k in feats if k not in ['spatial', module_name]
+            #     ] + [feat_prop]
+            #
+            #     feat = torch.cat(feat, dim=1)
+            #     feat_prop = feat_prop + self.backbone[module_name](feat)
+            #     feats[module_name].append(feat_prop)
+            ##################################################################
+
+            # 修正backward时存在i和idx不对应的bug
             for i, idx in enumerate(frame_idx):
                 feat_current = feats['spatial'][mapping_idx[idx]]
 
                 if i > 0:
-                    flow_n1 = flows[:, flow_idx[i], :, :, :]
+                    flow_n1 = flows[:, flow_idx[idx], :, :, :]
                     cond_n1 = flow_warp(feat_prop, flow_n1.permute(0, 2, 3, 1))
 
                     # initialize second-order features
@@ -116,7 +154,7 @@ class BidirectionalPropagation(nn.Module):
                     cond_n2 = torch.zeros_like(cond_n1)
                     if i > 1:
                         feat_n2 = feats[module_name][-2]
-                        flow_n2 = flows[:, flow_idx[i - 1], :, :, :]
+                        flow_n2 = flows[:, flow_idx[idx - 1], :, :, :]
                         flow_n2 = flow_n1 + flow_warp(
                             flow_n2, flow_n1.permute(0, 2, 3, 1))
                         cond_n2 = flow_warp(feat_n2,
@@ -136,6 +174,7 @@ class BidirectionalPropagation(nn.Module):
                 feat = torch.cat(feat, dim=1)
                 feat_prop = feat_prop + self.backbone[module_name](feat)
                 feats[module_name].append(feat_prop)
+            ##################################################################
 
             if 'backward' in module_name:
                 feats[module_name] = feats[module_name][::-1]
