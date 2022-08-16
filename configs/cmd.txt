@@ -1,0 +1,30 @@
+# 测试E2FGVI-lite速度
+--model
+e2fgvi_hq-lite
+--dataset
+davis
+--data_root
+datasets/
+--timing
+
+# 复现E2FGVI论文结果
+--model
+e2fgvi
+--dataset
+davis
+--data_root
+datasets/
+--ckpt
+release_model/E2FGVI-CVPR22.pth
+
+# 改进中间帧融合策略0.5，psnr提升0.1
+--model
+e2fgvi
+--dataset
+davis
+--data_root
+datasets/
+--ckpt
+release_model/E2FGVI-CVPR22.pth
+--good_fusion
+

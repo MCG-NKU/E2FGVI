@@ -61,12 +61,13 @@ class SPyNet(nn.Module):
     def __init__(
         self,
         use_pretrain=True,
-        pretrained='https://download.openmmlab.com/mmediting/restorers/basicvsr/spynet_20210409-c6c1bd09.pth'
+        pretrained='https://download.openmmlab.com/mmediting/restorers/basicvsr/spynet_20210409-c6c1bd09.pth',
+        module_level=6
     ):
         super().__init__()
 
         self.basic_module = nn.ModuleList(
-            [SPyNetBasicModule() for _ in range(6)])
+            [SPyNetBasicModule() for _ in range(module_level)])
 
         if use_pretrain:
             if isinstance(pretrained, str):
@@ -100,7 +101,8 @@ class SPyNet(nn.Module):
         supp = [(supp - self.mean) / self.std]
 
         # generate downsampled frames
-        for level in range(5):
+        # for level in range(5):  # default
+        for level in range(len(self.basic_module)-1):
             ref.append(
                 F.avg_pool2d(input=ref[-1],
                              kernel_size=2,
@@ -115,8 +117,12 @@ class SPyNet(nn.Module):
         supp = supp[::-1]
 
         # flow computation
-        flow = ref[0].new_zeros(n, 2, h // 32, w // 32)
-        for level in range(len(ref)):
+        # flow = ref[0].new_zeros(n, 2, h // 32, w // 32)     # default
+        reduce = 2**(len(self.basic_module)-1)
+        flow = ref[0].new_zeros(n, 2, h // reduce, w // reduce)
+
+        # for level in range(len(ref)):   # default
+        for level in range(len(self.basic_module)):
             if level == 0:
                 flow_up = flow
             else:

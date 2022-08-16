@@ -16,8 +16,8 @@ from core.dataset import TestDataset
 from core.metrics import calc_psnr_and_ssim, calculate_i3d_activations, calculate_vfid, init_i3d_model
 
 # global variables
-# w, h = 432, 240     # default acc. and speed test setting in e2fgvi for davis dataset
-w, h = 864, 480     # davis res 480x854
+w, h = 432, 240     # default acc. and speed test setting in e2fgvi for davis dataset
+# w, h = 864, 480     # davis res 480x854
 ref_length = 10     # non-local frames的步幅间隔，此处为每10帧取1帧NLF
 neighbor_stride = 5     # local frames的窗口大小，加上自身则窗口大小为6
 default_fps = 24
@@ -48,9 +48,10 @@ def main_worker(args):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     net = importlib.import_module('model.' + args.model)
     model = net.InpaintGenerator().to(device)
-    # data = torch.load(args.ckpt, map_location=device)
-    # model.load_state_dict(data)
-    # print(f'Loading from: {args.ckpt}')
+    if args.ckpt is not None:
+        data = torch.load(args.ckpt, map_location=device)
+        model.load_state_dict(data)
+        print(f'Loading from: {args.ckpt}')
     model.eval()
 
     total_frame_psnr = []
@@ -114,24 +115,34 @@ def main_worker(args):
                     idx = neighbor_ids[i]
                     img = np.array(pred_img[i]).astype(np.uint8) * binary_masks[i] \
                         + ori_frames[idx] * (1 - binary_masks[i])
-                    if comp_frames[idx] is None:
-                        # 如果第一次补全Local Frame中的某帧，直接记录到补全帧list (comp_frames) 里
-                        comp_frames[idx] = img
-                    # else:   # default 融合策略：不合理，neighbor_stride倍数的LF的中间帧权重为0.25，应当为0.5
-                    #     # 如果不是第一次补全Local Frame中的某帧，即该帧已补全过，则把此前结果与当前帧结果简单加和平均
-                    #     comp_frames[idx] = comp_frames[idx].astype(
-                    #         np.float32) * 0.5 + img.astype(np.float32) * 0.5
-                    elif idx == (neighbor_ids[0] + neighbor_ids[-1])/2:
-                        # 如果是中间帧，记录下来
-                        medium_frame = img
-                    elif (idx != 0) & (idx == neighbor_ids[0]):
-                        # 如果是第三次出现，加权平均
-                        comp_frames[idx] = comp_frames[idx].astype(
-                            np.float32) * 0.25 + medium_frame.astype(np.float32) * 0.5 + img.astype(np.float32) * 0.25
+
+                    if not args.good_fusion:
+                        if comp_frames[idx] is None:
+                            # 如果第一次补全Local Frame中的某帧，直接记录到补全帧list (comp_frames) 里
+                            comp_frames[idx] = img
+
+                        else:   # default 融合策略：不合理，neighbor_stride倍数的LF的中间帧权重为0.25，应当为0.5
+                            # 如果不是第一次补全Local Frame中的某帧，即该帧已补全过，则把此前结果与当前帧结果简单加和平均
+                            comp_frames[idx] = comp_frames[idx].astype(
+                                np.float32) * 0.5 + img.astype(np.float32) * 0.5
+                        ########################################################################################
                     else:
-                        # 如果是不是中间帧，权重为0.5
-                        comp_frames[idx] = comp_frames[idx].astype(
-                            np.float32) * 0.5 + img.astype(np.float32) * 0.5
+                        if comp_frames[idx] is None:
+                            # 如果第一次补全Local Frame中的某帧，直接记录到补全帧list (comp_frames) 里
+                            comp_frames[idx] = img
+
+                        elif idx == (neighbor_ids[0] + neighbor_ids[-1])/2:
+                            # 如果是中间帧，记录下来
+                            medium_frame = img
+                        elif (idx != 0) & (idx == neighbor_ids[0]):
+                            # 如果是第三次出现，加权平均
+                            comp_frames[idx] = comp_frames[idx].astype(
+                                np.float32) * 0.25 + medium_frame.astype(np.float32) * 0.5 + img.astype(np.float32) * 0.25
+                        else:
+                            # 如果是不是中间帧，权重为0.5
+                            comp_frames[idx] = comp_frames[idx].astype(
+                                np.float32) * 0.5 + img.astype(np.float32) * 0.5
+                        ########################################################################################
 
         # calculate metrics
         cur_video_psnr = []
@@ -198,12 +209,13 @@ if __name__ == '__main__':
                         choices=['davis', 'youtube-vos'],
                         type=str)
     parser.add_argument('--data_root', type=str, required=True)
-    parser.add_argument('--model', choices=['e2fgvi', 'e2fgvi_hq'], type=str)
-    parser.add_argument('--ckpt', type=str, required=True)
+    parser.add_argument('--model', choices=['e2fgvi', 'e2fgvi_hq', 'e2fgvi_hq-lite'], type=str)
+    parser.add_argument('--ckpt', type=str, default=None)
     parser.add_argument('--save_results', action='store_true', default=False)
     parser.add_argument('--num_workers', default=4, type=int)
     parser.add_argument('--timing', action='store_true', default=False)
     parser.add_argument('--profile', action='store_true', default=False)
+    parser.add_argument('--good_fusion', action='store_true', default=False, help='using my fusion strategy')
     args = parser.parse_args()
 
     if args.profile:
