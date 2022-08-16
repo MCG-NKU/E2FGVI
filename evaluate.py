@@ -16,8 +16,8 @@ from core.dataset import TestDataset
 from core.metrics import calc_psnr_and_ssim, calculate_i3d_activations, calculate_vfid, init_i3d_model
 
 # global variables
-w, h = 432, 240     # default acc. and speed test setting in e2fgvi for davis dataset
-# w, h = 864, 480     # davis res 480x854
+# w, h = 432, 240     # default acc. test setting in e2fgvi for davis dataset
+w, h = 864, 480     # davis res 480x854 default speed test setting in e2fgvi for davis dataset
 ref_length = 10     # non-local frames的步幅间隔，此处为每10帧取1帧NLF
 neighbor_stride = 5     # local frames的窗口大小，加上自身则窗口大小为6
 default_fps = 24

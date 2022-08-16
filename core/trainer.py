@@ -345,6 +345,7 @@ class Trainer:
 
             # generator l1 loss
             hole_loss = self.l1_loss(pred_imgs * masks, frames * masks)
+            # 空洞内的loss
             hole_loss = hole_loss / torch.mean(masks) \
                 * self.config['losses']['hole_weight']
             gen_loss += hole_loss
@@ -353,6 +354,7 @@ class Trainer:
 
             valid_loss = self.l1_loss(pred_imgs * (1 - masks),
                                       frames * (1 - masks))
+            # 非遮挡区域的loss
             valid_loss = valid_loss / torch.mean(1-masks) \
                 * self.config['losses']['valid_weight']
             gen_loss += valid_loss
@@ -360,6 +362,7 @@ class Trainer:
                              valid_loss.item())
 
             self.optimG.zero_grad()
+            # gen loss 是对抗、光流、空洞和非遮挡区域loss之和
             gen_loss.backward()
             self.optimG.step()
 
