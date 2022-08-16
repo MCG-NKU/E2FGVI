@@ -209,7 +209,7 @@ if __name__ == '__main__':
                         choices=['davis', 'youtube-vos'],
                         type=str)
     parser.add_argument('--data_root', type=str, required=True)
-    parser.add_argument('--model', choices=['e2fgvi', 'e2fgvi_hq', 'e2fgvi_hq-lite'], type=str)
+    parser.add_argument('--model', choices=['e2fgvi', 'e2fgvi_hq', 'e2fgvi_hq-lite', 'lite-MFN'], type=str)
     parser.add_argument('--ckpt', type=str, default=None)
     parser.add_argument('--save_results', action='store_true', default=False)
     parser.add_argument('--num_workers', default=4, type=int)
