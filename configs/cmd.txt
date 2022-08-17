@@ -30,7 +30,7 @@ datasets/
 release_model/E2FGVI-CVPR22.pth
 --good_fusion
 
-##################################################### *9[G6]=zJJ#i0Z%Q
+#####################################################
 新建会话：tmux new -s SESSION-NAME
 杀死会话：tmux kill-session -t 0
 接入会话：tmux attach-session -t 0
@@ -38,6 +38,7 @@ release_model/E2FGVI-CVPR22.pth
 
 # 远程连接tensorboard
 ssh -p 29837 -NL 8008:localhost:6006 root@hz-t2.matpool.com
+*9[G6]=zJJ#i0Z%Q
 输入密码后会卡死，直接新开一个终端启动tb就好了
 
 # 打开tb
@@ -53,7 +54,7 @@ python train.py -c configs/ablation_e2fgvi_baseline.json
 # 训练e2fgvi-lite bs2 3090单卡 back光流不对齐 250k 约42h 若bs4则需要约73h
 python train.py -c configs/ablation_e2fgvi_hq-lite.json
 
-# 训练e2fgvi-lite bs2 3090单卡 250k back光流不对齐 [停止]
+# 训练e2fgvi-lite bs2 3090单卡 250k back光流不对齐 [tmux 0 灵活训练]
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_e2fgvi_hq-lite.json
 
 # 训练e2fgvi-lite bs2 3090单卡 250k back光流对齐 [停止] 确实会好一些,我们自己用
@@ -62,5 +63,8 @@ CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_e2fgvi_hq-lite-flow-a
 # 训练e2fgvi-lite bs2 3090单卡 250k back光流不对齐 SpyNet预训练初始化 [tmux 1] 用这个当作baseline 速度也在0.04s左右
 CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_e2fgvi_hq-lite-flow-init.json
 
-# 训练e2fgvi-lite bs2 3090单卡 250k back光流对齐 maskflownet [未开始]
-CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_e2fgvi_hq-lite-MFN.json
+# 训练lite-MFN bs2 3090单卡 250k back光流对齐 maskflownetS [tmux 0] 约需要55h
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN.json
+
+# 训练lite-MFN bs2 3090单卡 250k back光流对齐 maskflownetS 拆掉后面的dcn对齐？ [未开始]
+

@@ -222,7 +222,7 @@ class InpaintGenerator(BaseNetwork):
 
         # flow completion network
         self.update_spynet = SPyNet()   # default
-        # self.update_spynet = SPyNet(use_pretrain=False, module_level=3)
+        # self.update_spynet = SPyNet(use_pretrain=False, module_level=3)   # light flow without init
 
     def forward_bidirect_flow(self, masked_local_frames):
         b, l_t, c, h, w = masked_local_frames.size()

@@ -6,13 +6,21 @@ import torch
 
 from mmcv.cnn import ConvModule
 from mmcv.runner import load_checkpoint
+from model.modules.flow_comp_MFN import MaskFlowNetS
 
 
 class FlowCompletionLoss(nn.Module):
     """Flow completion loss"""
-    def __init__(self):
+    def __init__(self, estimator='spy'):
         super().__init__()
-        self.fix_spynet = SPyNet()
+        if estimator == 'spy':
+            # default flow compute with spynet:
+            self.fix_spynet = SPyNet()
+        elif estimator == 'mfn':
+            self.fix_spynet = MaskFlowNetS()
+        else:
+            raise TypeError('[estimator] should be spy or mfn, '
+                            f'but got {estimator}.')
 
         # 算GT的SpyNet锁了权重，补全光流的SpyNet没有锁权重
         for p in self.fix_spynet.parameters():

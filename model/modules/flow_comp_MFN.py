@@ -1,405 +1,37 @@
-import numpy as np
-
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch
 
-from mmcv.cnn import ConvModule
-from mmcv.runner import load_checkpoint
+from mmflow.apis import init_model, inference_model
 
 
-class FlowCompletionLoss(nn.Module):
-    """Flow completion loss"""
-    def __init__(self):
-        super().__init__()
-        self.fix_spynet = SPyNet()
-
-        # 算GT的SpyNet锁了权重，补全光流的SpyNet没有锁权重
-        for p in self.fix_spynet.parameters():
-            p.requires_grad = False
-
-        self.l1_criterion = nn.L1Loss()
-
-    def forward(self, pred_flows, gt_local_frames):
-        b, l_t, c, h, w = gt_local_frames.size()
-
-        with torch.no_grad():
-            # compute gt forward and backward flows
-            gt_local_frames = F.interpolate(gt_local_frames.view(-1, c, h, w),
-                                            scale_factor=1 / 4,
-                                            mode='bilinear',
-                                            align_corners=True,
-                                            recompute_scale_factor=True)
-            gt_local_frames = gt_local_frames.view(b, l_t, c, h // 4, w // 4)
-            gtlf_1 = gt_local_frames[:, :-1, :, :, :].reshape(
-                -1, c, h // 4, w // 4)
-            gtlf_2 = gt_local_frames[:, 1:, :, :, :].reshape(
-                -1, c, h // 4, w // 4)
-            gt_flows_forward = self.fix_spynet(gtlf_1, gtlf_2)
-            gt_flows_backward = self.fix_spynet(gtlf_2, gtlf_1)
-
-        # calculate loss for flow completion
-        forward_flow_loss = self.l1_criterion(
-            pred_flows[0].view(-1, 2, h // 4, w // 4), gt_flows_forward)
-        backward_flow_loss = self.l1_criterion(
-            pred_flows[1].view(-1, 2, h // 4, w // 4), gt_flows_backward)
-        flow_loss = forward_flow_loss + backward_flow_loss
-
-        return flow_loss
-
-from mmcv.runner import BaseModule
-from abc import ABCMeta, abstractmethod
-from mmcv.utils import print_log, get_logger
-from typing import Optional, Union, Sequence, Dict, Tuple
-from collections import OrderedDict
-import logging
-import torch.distributed as dist
-from mmcv.cnn import MODELS as MMCV_MODELS
-from mmcv.utils import Registry, build_from_cfg
-from torch.nn import Module
-from torch import Tensor
-from numpy import ndarray
-
-MODELS = Registry('models', parent=MMCV_MODELS)
-ENCODERS = MODELS
-DECODERS = MODELS
-FLOW_ESTIMATORS = MODELS
-LOSSES = MODELS
-COMPONENTS = MODELS
-
-
-def get_root_logger(log_file: Optional[str] = None,
-                    log_level: int = logging.INFO) -> logging.Logger:
-    """Get the logger when training or testing task.
-    Args:
-        log_file (str, optional): The name of the log file. Defaults to None.
-        log_level (int): The logger level. Note that only the process of
-            rank 0 is affected, and other processes will set the level to
-            "Error" thus be silent most of the time.
-    Returns:
-        logging.Logger: The expected logger.
-    """
-    return get_logger('mmflow', log_file, log_level)
-
-
-class FlowEstimator(BaseModule, metaclass=ABCMeta):
-    """Base class for flow estimator.
-    Args:
-        freeze_net (bool): Whether freeze the weights of model. If set True,
-            the model will not update the weights.
-        init_cfg (dict, list, optional): Config dict of weights initialization.
-            Defaults to None.
-    """
-
-    def __init__(self,
-                 freeze_net: bool = False,
-                 init_cfg: Optional[Union[list, dict]] = None,
-                 train_cfg: Optional[dict] = None,
-                 test_cfg: Optional[dict] = None) -> None:
-        super().__init__(init_cfg)
-
-        self.status = dict(iter=0, max_iters=0)
-        self.freeze_net = freeze_net
-        # if set freeze_net True, the weights in this model
-        # will be not updated and predict the flow maps.
-        if self.freeze_net:
-            logger = get_root_logger()
-            print_log(
-                f'Freeze the parameters in {self.__class__.__name__}',
-                logger=logger)
-            self.eval()
-            for p in self.parameters():
-                p.requires_grad = False
-
-        self.train_cfg = train_cfg
-        self.test_cfg = test_cfg
-
-    @abstractmethod
-    def forward_train(self, *args, **kwargs):
-        """Placeholder for forward function of flow estimator when training."""
-        pass
-
-    @abstractmethod
-    def forward_test(self, *args, **kwargs):
-        """Placeholder for forward function of flow estimator when testing."""
-        pass
-
-    def forward(self, *args, test_mode=True, **kwargs):
-        if not test_mode:
-            return self.forward_train(*args, **kwargs)
-        else:
-            return self.forward_test(*args, **kwargs)
-
-    def train_step(self, data, optimizer):
-        """The iteration step during training.
-        This method defines an iteration step during training, except for the
-        back propagation and optimizer updating, which are done in an optimizer
-        hook. Note that in some complicated cases or models, the whole process
-        including back propagation and optimizer updating is also defined in
-        this method, such as GAN.
-        Args:
-            data (dict): The output of dataloader.
-            optimizer (:obj:`torch.optim.Optimizer` | dict): The optimizer of
-                runner is passed to ``train_step()``. This argument is unused
-                and reserved.
-        Returns:
-            dict: It should contain at least 3 keys: ``loss``, ``log_vars``, \
-                ``num_samples``.
-                - ``loss`` is a tensor for back propagation, which can be a \
-                weighted sum of multiple losses.
-                - ``log_vars`` contains all the variables to be sent to the
-                logger.
-                - ``num_samples`` indicates the batch size (when the model is \
-                DDP, it means the batch size on each GPU), which is used for \
-                averaging the logs.
-        """
-        losses = self(**data, test_mode=False)
-        loss, log_vars = self._parse_losses(losses)
-
-        outputs = dict(
-            loss=loss, log_vars=log_vars, num_samples=len(data['img_metas']))
-
-        return outputs
-
-    def val_step(self, data, optimizer):
-        """The iteration step during validation.
-        This method shares the same signature as :func:`train_step`, but used
-        during val epochs. Note that the evaluation after training epochs is
-        not implemented with this method, but an evaluation hook.
-        """
-        losses = self(**data, test_mode=True)
-        loss, log_vars = self._parse_losses(losses)
-
-        outputs = dict(
-            loss=loss, log_vars=log_vars, num_samples=len(data['img_metas']))
-
-        return outputs
-
-    @staticmethod
-    def _parse_losses(losses):
-        """Parse the raw outputs (losses) of the network.
-        Args:
-            losses (dict): Raw output of the network, which usually contain
-                losses and other necessary information.
-        Returns:
-            tuple[Tensor, dict]: (loss, log_vars), loss is the loss tensor
-                which may be a weighted sum of all losses, log_vars contains
-                all the variables to be sent to the logger.
-        """
-        log_vars = OrderedDict()
-        for loss_name, loss_value in losses.items():
-            if isinstance(loss_value, torch.Tensor):
-                log_vars[loss_name] = loss_value.mean()
-            elif isinstance(loss_value, list):
-                log_vars[loss_name] = sum(_loss.mean() for _loss in loss_value)
-            else:
-                raise TypeError(
-                    f'{loss_name} is not a tensor or list of tensors')
-
-        loss = sum(_value for _key, _value in log_vars.items()
-                   if 'loss' in _key)
-
-        log_vars['loss'] = loss
-        for loss_name, loss_value in log_vars.items():
-            # reduce loss when distributed training
-            if dist.is_available() and dist.is_initialized():
-                loss_value = loss_value.data.clone()
-                dist.all_reduce(loss_value.div_(dist.get_world_size()))
-            log_vars[loss_name] = loss_value.item()
-
-        return loss, log_vars
-
-
-def build(cfg: Union[Sequence[dict], dict],
-          registry: Registry,
-          default_args: Optional[dict] = None):
-    """Build a module.
-    Args:
-        cfg (dict, list[dict]): The config of modules, is is either a dict
-            or a list of configs.
-        registry (:obj:`Registry`): A registry the module belongs to.
-        default_args (dict, optional): Default arguments to build the module.
-            Defaults to None.
-    Returns:
-        nn.Module: A built nn module.
-    """
-    if isinstance(cfg, list):
-        modules = [
-            build_from_cfg(cfg_, registry, default_args) for cfg_ in cfg
-        ]
-        return nn.Sequential(*modules)
-    else:
-        return build_from_cfg(cfg, registry, default_args)
-
-
-def build_encoder(cfg: dict) -> Module:
-    """Build encoder for flow estimator.
-    Args:
-        cfg (dict): Config for encoder.
-    Returns:
-        Module: Encoder module.
-    """
-    return build(cfg, ENCODERS)
-
-
-def build_decoder(cfg: dict) -> Module:
-    """Build decoder for flow estimator.
-    Args:
-        cfg (dict): Config for decoder.
-    Returns:
-        Module: Decoder module.
-    """
-    return build(cfg, DECODERS)
-
-
-@FLOW_ESTIMATORS.register_module()
-class PWCNet(FlowEstimator):
-    """PWC-Net model.
-    Args:
-        encoder (dict): The config of encoder.
-        decoder (dict): The config of decoder.
-        init_cfg (list, dict, optional): Config of dict weights initialization.
-            Default: None.
-    """
-
-    def __init__(self,
-                 encoder: dict,
-                 decoder: dict,
-                 init_cfg: Optional[Union[dict, list]] = None,
-                 **kwargs):
-
-        super().__init__(init_cfg=init_cfg, **kwargs)
-        self.encoder = build_encoder(encoder)
-        self.decoder = build_decoder(decoder)
-
-    def extract_feat(self, imgs: Tensor) -> Dict[str, Tensor]:
-        """Extract features from images.
-        Args:
-            imgs (Tensor): The concatenated input images.
-        Returns:
-            Tuple[Dict[str, Tensor], Dict[str, Tensor]]: The feature pyramid of
-                the first input image and the feature pyramid of secode input
-                image.
-        """
-
-        in_channels = self.encoder.in_channels
-        img1 = imgs[:, :in_channels, ...]
-        img2 = imgs[:, in_channels:, ...]
-        return self.encoder(img1), self.encoder(img2)
-
-    def forward_train(
-            self,
-            imgs: Tensor,
-            flow_gt: Tensor,
-            valid: Optional[Tensor] = None,
-            img_metas: Optional[Sequence[dict]] = None) -> Dict[str, Tensor]:
-        """Forward function for PWCNet when model training.
-        Args:
-            imgs (Tensor): The concatenated input images.
-            flow_gt (Tensor): The ground truth of optical flow.
-                Defaults to None.
-            valid (Tensor, optional): The valid mask. Defaults to None.
-            img_metas (Sequence[dict], optional): meta data of image to revert
-                the flow to original ground truth size. Defaults to None.
-        Returns:
-            Dict[str, Tensor]: The losses of output.
-        """
-        feat1, feat2 = self.extract_feat(imgs)
-        return self.decoder.forward_train(
-            feat1=feat1, feat2=feat2, flow_gt=flow_gt, valid=valid)
-
-    def forward_test(
-            self,
-            imgs: Tensor,
-            img_metas: Optional[Sequence[dict]] = None) -> Sequence[ndarray]:
-        """Forward function for PWCNet when model testing.
-        Args:
-            imgs (Tensor): The concatenated input images.
-            img_metas (Sequence[dict], optional): meta data of image to revert
-                the flow to original ground truth size. Defaults to None.
-        Returns:
-            Sequence[Dict[str, ndarray]]: the batch of predicted optical flow
-                with the same size of images after augmentation.
-        """
-
-        H, W = imgs.shape[2:]
-        feat1, feat2 = self.extract_feat(imgs)
-        return self.decoder.forward_test(feat1, feat2, H, W, img_metas)
-
-
-def centralize(img1: Tensor, img2: Tensor) -> Tuple[Tensor, Tensor]:
-    """Centralize input images.
-    Args:
-        img1 (Tensor): The first input image.
-        img2 (Tensor): The second input image.
-    Returns:
-        Tuple[Tensor, Tensor]: The first centralized image and the second
-            centralized image.
-    """
-    rgb_mean = torch.cat((img1, img2), 2)
-    rgb_mean = rgb_mean.view(rgb_mean.shape[0], 3, -1).mean(2)
-    rgb_mean = rgb_mean.view(rgb_mean.shape[0], 3, 1, 1)
-    return img1 - rgb_mean, img2 - rgb_mean, rgb_mean
-
-
-@FLOW_ESTIMATORS.register_module()
-class MaskFlowNetS(PWCNet):
-    """MaskFlowNetS model."""
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    def extract_feat(self, imgs: Tensor) -> Tuple[Dict[str, Tensor]]:
-        """Extract features from images.
-        Args:
-            imgs (Tensor): The concatenated input images.
-        Returns:
-            Tuple[Dict[str, Tensor], Dict[str, Tensor]]: The feature pyramid of
-                the first input image and the feature pyramid of secode input
-                image.
-        """
-        in_channels = self.encoder.in_channels
-        img1 = imgs[:, :in_channels, ...]
-        img2 = imgs[:, in_channels:, ...]
-        img1, img2, _ = centralize(img1, img2)
-        return self.encoder(img1), self.encoder(img2)
-
-
-def build_flow_estimator(cfg: dict) -> Module:
-    """Build flow estimator.
-    Args:
-        cfg (dict): Config for optical flow estimator.
-    Returns:
-        Module: Flow estimator.
-    """
-    return build(cfg, FLOW_ESTIMATORS)
-
-
-class MaskFlowNet(nn.Module):
-    """SPyNet network structure.
-    The difference to the SPyNet in [tof.py] is that
-        1. more SPyNetBasicModule is used in this version, and
-        2. no batch normalization is used in this version.
+class MaskFlowNetS(nn.Module):
+    """MaskFlowNetS network structure.
+    The difference to the MaskFlowNetS is that
+        1.
     Paper:
-        Optical Flow Estimation using a Spatial Pyramid Network, CVPR, 2017
+        MaskFlownet: Asymmetric Feature Matching With Learnable Occlusion Mask, CVPR, 2020
     Args:
-        pretrained (str): path for pre-trained SPyNet. Default: None.
+        pretrained (str): path for pre-trained MaskFlowNetS. Default: None.
     """
     def __init__(
         self,
         use_pretrain=True,
-        pretrained='https://download.openmmlab.com/mmediting/restorers/basicvsr/spynet_20210409-c6c1bd09.pth',
+        # pretrained='https://download.openmmlab.com/mmflow/maskflownet/maskflownets_8x1_slong_flyingchairs_384x448.pth',
+        pretrained='./release_model/maskflownets_8x1_sfine_flyingthings3d_subset_384x768.pth',
+        config_file='../mmflow/configs/maskflownets_8x1_sfine_flyingthings3d_subset_384x768.py',
+        device='cuda:0',
         module_level=6
     ):
         super().__init__()
 
-        self.basic_module = nn.ModuleList(
-            [SPyNetBasicModule() for _ in range(module_level)])
+        self.maskflownetS = init_model(config_file, pretrained, device=device)
 
         if use_pretrain:
             if isinstance(pretrained, str):
-                print("load pretrained SPyNet...")
-                load_checkpoint(self, pretrained, strict=True)
+                print("load pretrained MaskFlowNetS...")
+                self.maskflownetS = init_model(config_file, pretrained, device=device)
+                # load_checkpoint(self, pretrained, strict=True)
             elif pretrained is not None:
                 raise TypeError('[pretrained] should be str or None, '
                                 f'but got {type(pretrained)}.')
@@ -411,10 +43,25 @@ class MaskFlowNet(nn.Module):
             'std',
             torch.Tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
 
+    @staticmethod
+    def centralize(img1, img2):
+        """Centralize input images.
+        Args:
+            img1 (Tensor): The first input image.
+            img2 (Tensor): The second input image.
+        Returns:
+            Tuple[Tensor, Tensor]: The first centralized image and the second
+                centralized image.
+        """
+        rgb_mean = torch.cat((img1, img2), 2)
+        rgb_mean = rgb_mean.view(rgb_mean.shape[0], 3, -1).mean(2)
+        rgb_mean = rgb_mean.view(rgb_mean.shape[0], 3, 1, 1)
+        return img1 - rgb_mean, img2 - rgb_mean, rgb_mean
+
     def compute_flow(self, ref, supp):
         """Compute flow from ref to supp.
         Note that in this function, the images are already resized to a
-        multiple of 32.
+        multiple of 64.
         Args:
             ref (Tensor): Reference image with shape of (n, 3, h, w).
             supp (Tensor): Supporting image with shape of (n, 3, h, w).
@@ -424,52 +71,19 @@ class MaskFlowNet(nn.Module):
         n, _, h, w = ref.size()
 
         # normalize the input images
-        ref = [(ref - self.mean) / self.std]
-        supp = [(supp - self.mean) / self.std]
+        # ref = [(ref - self.mean) / self.std]
+        # supp = [(supp - self.mean) / self.std]
 
-        # generate downsampled frames
-        # for level in range(5):  # default
-        for level in range(len(self.basic_module)-1):
-            ref.append(
-                F.avg_pool2d(input=ref[-1],
-                             kernel_size=2,
-                             stride=2,
-                             count_include_pad=False))
-            supp.append(
-                F.avg_pool2d(input=supp[-1],
-                             kernel_size=2,
-                             stride=2,
-                             count_include_pad=False))
-        ref = ref[::-1]
-        supp = supp[::-1]
+        # ref, supp, _ = self.centralize(ref, supp)
 
-        # flow computation
-        # flow = ref[0].new_zeros(n, 2, h // 32, w // 32)     # default
-        reduce = 2**(len(self.basic_module)-1)
-        flow = ref[0].new_zeros(n, 2, h // reduce, w // reduce)
+        feat1, feat2 = self.maskflownetS.extract_feat(torch.cat((ref, supp), dim=1))
+        flows_stage1, mask_stage1 = self.maskflownetS.decoder(
+            feat1, feat2, return_mask=True)
 
-        # for level in range(len(ref)):   # default
-        for level in range(len(self.basic_module)):
-            if level == 0:
-                flow_up = flow
-            else:
-                flow_up = F.interpolate(input=flow,
-                                        scale_factor=2,
-                                        mode='bilinear',
-                                        align_corners=True) * 2.0
-
-            # add the residue to the upsampled flow
-            flow = flow_up + self.basic_module[level](torch.cat([
-                ref[level],
-                flow_warp(supp[level],
-                          flow_up.permute(0, 2, 3, 1).contiguous(),
-                          padding_mode='border'), flow_up
-            ], 1))
-
-        return flow
+        return flows_stage1
 
     def forward(self, ref, supp):
-        """Forward function of SPyNet.
+        """Forward function of MaskFlowNetS.
         This function computes the optical flow from ref to supp.
         Args:
             ref (Tensor): Reference image with shape of (n, 3, h, w).
@@ -478,10 +92,23 @@ class MaskFlowNet(nn.Module):
             Tensor: Estimated optical flow: (n, 2, h, w).
         """
 
-        # upsize to a multiple of 32
+        # # upsize to a multiple of 32
+        # h, w = ref.shape[2:4]
+        # w_up = w if (w % 32) == 0 else 32 * (w // 32 + 1)
+        # h_up = h if (h % 32) == 0 else 32 * (h // 32 + 1)
+        # ref = F.interpolate(input=ref,
+        #                     size=(h_up, w_up),
+        #                     mode='bilinear',
+        #                     align_corners=False)
+        # supp = F.interpolate(input=supp,
+        #                      size=(h_up, w_up),
+        #                      mode='bilinear',
+        #                      align_corners=False)
+
+        # upsize to a multiple of 64
         h, w = ref.shape[2:4]
-        w_up = w if (w % 32) == 0 else 32 * (w // 32 + 1)
-        h_up = h if (h % 32) == 0 else 32 * (h // 32 + 1)
+        w_up = w if (w % 64) == 0 else 64 * (w // 64 + 1)
+        h_up = h if (h % 64) == 0 else 64 * (h // 64 + 1)
         ref = F.interpolate(input=ref,
                             size=(h_up, w_up),
                             mode='bilinear',
@@ -492,7 +119,7 @@ class MaskFlowNet(nn.Module):
                              align_corners=False)
 
         # compute flow, and resize back to the original resolution
-        flow = F.interpolate(input=self.compute_flow(ref, supp),
+        flow = F.interpolate(input=self.compute_flow(ref, supp)['level2'],
                              size=(h, w),
                              mode='bilinear',
                              align_corners=False)
@@ -504,282 +131,15 @@ class MaskFlowNet(nn.Module):
         return flow
 
 
-class SPyNetBasicModule(nn.Module):
-    """Basic Module for SPyNet.
-    Paper:
-        Optical Flow Estimation using a Spatial Pyramid Network, CVPR, 2017
-    """
-    def __init__(self):
-        super().__init__()
+def test_MFN():
+    # Specify the path to model config and checkpoint file
+    config_file = '../../../mmflow/configs/maskflownets_8x1_sfine_flyingthings3d_subset_384x768.py'
+    checkpoint_file = '../../release_model/maskflownets_8x1_sfine_flyingthings3d_subset_384x768.pth'
 
-        self.basic_module = nn.Sequential(
-            ConvModule(in_channels=8,
-                       out_channels=32,
-                       kernel_size=7,
-                       stride=1,
-                       padding=3,
-                       norm_cfg=None,
-                       act_cfg=dict(type='ReLU')),
-            ConvModule(in_channels=32,
-                       out_channels=64,
-                       kernel_size=7,
-                       stride=1,
-                       padding=3,
-                       norm_cfg=None,
-                       act_cfg=dict(type='ReLU')),
-            ConvModule(in_channels=64,
-                       out_channels=32,
-                       kernel_size=7,
-                       stride=1,
-                       padding=3,
-                       norm_cfg=None,
-                       act_cfg=dict(type='ReLU')),
-            ConvModule(in_channels=32,
-                       out_channels=16,
-                       kernel_size=7,
-                       stride=1,
-                       padding=3,
-                       norm_cfg=None,
-                       act_cfg=dict(type='ReLU')),
-            ConvModule(in_channels=16,
-                       out_channels=2,
-                       kernel_size=7,
-                       stride=1,
-                       padding=3,
-                       norm_cfg=None,
-                       act_cfg=None))
-
-    def forward(self, tensor_input):
-        """
-        Args:
-            tensor_input (Tensor): Input tensor with shape (b, 8, h, w).
-                8 channels contain:
-                [reference image (3), neighbor image (3), initial flow (2)].
-        Returns:
-            Tensor: Refined flow with shape (b, 2, h, w)
-        """
-        return self.basic_module(tensor_input)
+    # build the model from a config file and a checkpoint file
+    model = init_model(config_file, checkpoint_file, device='cuda:0')
+    pass
 
 
-# Flow visualization code used from https://github.com/tomrunia/OpticalFlow_Visualization
-def make_colorwheel():
-    """
-    Generates a color wheel for optical flow visualization as presented in:
-        Baker et al. "A Database and Evaluation Methodology for Optical Flow" (ICCV, 2007)
-        URL: http://vision.middlebury.edu/flow/flowEval-iccv07.pdf
-
-    Code follows the original C++ source code of Daniel Scharstein.
-    Code follows the the Matlab source code of Deqing Sun.
-
-    Returns:
-        np.ndarray: Color wheel
-    """
-
-    RY = 15
-    YG = 6
-    GC = 4
-    CB = 11
-    BM = 13
-    MR = 6
-
-    ncols = RY + YG + GC + CB + BM + MR
-    colorwheel = np.zeros((ncols, 3))
-    col = 0
-
-    # RY
-    colorwheel[0:RY, 0] = 255
-    colorwheel[0:RY, 1] = np.floor(255 * np.arange(0, RY) / RY)
-    col = col + RY
-    # YG
-    colorwheel[col:col + YG, 0] = 255 - np.floor(255 * np.arange(0, YG) / YG)
-    colorwheel[col:col + YG, 1] = 255
-    col = col + YG
-    # GC
-    colorwheel[col:col + GC, 1] = 255
-    colorwheel[col:col + GC, 2] = np.floor(255 * np.arange(0, GC) / GC)
-    col = col + GC
-    # CB
-    colorwheel[col:col + CB, 1] = 255 - np.floor(255 * np.arange(CB) / CB)
-    colorwheel[col:col + CB, 2] = 255
-    col = col + CB
-    # BM
-    colorwheel[col:col + BM, 2] = 255
-    colorwheel[col:col + BM, 0] = np.floor(255 * np.arange(0, BM) / BM)
-    col = col + BM
-    # MR
-    colorwheel[col:col + MR, 2] = 255 - np.floor(255 * np.arange(MR) / MR)
-    colorwheel[col:col + MR, 0] = 255
-    return colorwheel
-
-
-def flow_uv_to_colors(u, v, convert_to_bgr=False):
-    """
-    Applies the flow color wheel to (possibly clipped) flow components u and v.
-
-    According to the C++ source code of Daniel Scharstein
-    According to the Matlab source code of Deqing Sun
-
-    Args:
-        u (np.ndarray): Input horizontal flow of shape [H,W]
-        v (np.ndarray): Input vertical flow of shape [H,W]
-        convert_to_bgr (bool, optional): Convert output image to BGR. Defaults to False.
-
-    Returns:
-        np.ndarray: Flow visualization image of shape [H,W,3]
-    """
-    flow_image = np.zeros((u.shape[0], u.shape[1], 3), np.uint8)
-    colorwheel = make_colorwheel()  # shape [55x3]
-    ncols = colorwheel.shape[0]
-    rad = np.sqrt(np.square(u) + np.square(v))
-    a = np.arctan2(-v, -u) / np.pi
-    fk = (a + 1) / 2 * (ncols - 1)
-    k0 = np.floor(fk).astype(np.int32)
-    k1 = k0 + 1
-    k1[k1 == ncols] = 0
-    f = fk - k0
-    for i in range(colorwheel.shape[1]):
-        tmp = colorwheel[:, i]
-        col0 = tmp[k0] / 255.0
-        col1 = tmp[k1] / 255.0
-        col = (1 - f) * col0 + f * col1
-        idx = (rad <= 1)
-        col[idx] = 1 - rad[idx] * (1 - col[idx])
-        col[~idx] = col[~idx] * 0.75  # out of range
-        # Note the 2-i => BGR instead of RGB
-        ch_idx = 2 - i if convert_to_bgr else i
-        flow_image[:, :, ch_idx] = np.floor(255 * col)
-    return flow_image
-
-
-def flow_to_image(flow_uv, clip_flow=None, convert_to_bgr=False):
-    """
-    Expects a two dimensional flow image of shape.
-
-    Args:
-        flow_uv (np.ndarray): Flow UV image of shape [H,W,2]
-        clip_flow (float, optional): Clip maximum of flow values. Defaults to None.
-        convert_to_bgr (bool, optional): Convert output image to BGR. Defaults to False.
-
-    Returns:
-        np.ndarray: Flow visualization image of shape [H,W,3]
-    """
-    assert flow_uv.ndim == 3, 'input flow must have three dimensions'
-    assert flow_uv.shape[2] == 2, 'input flow must have shape [H,W,2]'
-    if clip_flow is not None:
-        flow_uv = np.clip(flow_uv, 0, clip_flow)
-    u = flow_uv[:, :, 0]
-    v = flow_uv[:, :, 1]
-    rad = np.sqrt(np.square(u) + np.square(v))
-    rad_max = np.max(rad)
-    epsilon = 1e-5
-    u = u / (rad_max + epsilon)
-    v = v / (rad_max + epsilon)
-    return flow_uv_to_colors(u, v, convert_to_bgr)
-
-
-def flow_warp(x,
-              flow,
-              interpolation='bilinear',
-              padding_mode='zeros',
-              align_corners=True):
-    """Warp an image or a feature map with optical flow.
-    Args:
-        x (Tensor): Tensor with size (n, c, h, w).
-        flow (Tensor): Tensor with size (n, h, w, 2). The last dimension is
-            a two-channel, denoting the width and height relative offsets.
-            Note that the values are not normalized to [-1, 1].
-        interpolation (str): Interpolation mode: 'nearest' or 'bilinear'.
-            Default: 'bilinear'.
-        padding_mode (str): Padding mode: 'zeros' or 'border' or 'reflection'.
-            Default: 'zeros'.
-        align_corners (bool): Whether align corners. Default: True.
-    Returns:
-        Tensor: Warped image or feature map.
-    """
-    if x.size()[-2:] != flow.size()[1:3]:
-        raise ValueError(f'The spatial sizes of input ({x.size()[-2:]}) and '
-                         f'flow ({flow.size()[1:3]}) are not the same.')
-    _, _, h, w = x.size()
-    # create mesh grid
-    grid_y, grid_x = torch.meshgrid(torch.arange(0, h), torch.arange(0, w))
-    grid = torch.stack((grid_x, grid_y), 2).type_as(x)  # (w, h, 2)
-    grid.requires_grad = False
-
-    grid_flow = grid + flow
-    # scale grid_flow to [-1,1]
-    grid_flow_x = 2.0 * grid_flow[:, :, :, 0] / max(w - 1, 1) - 1.0
-    grid_flow_y = 2.0 * grid_flow[:, :, :, 1] / max(h - 1, 1) - 1.0
-    grid_flow = torch.stack((grid_flow_x, grid_flow_y), dim=3)
-    output = F.grid_sample(x,
-                           grid_flow,
-                           mode=interpolation,
-                           padding_mode=padding_mode,
-                           align_corners=align_corners)
-    return output
-
-
-def initial_mask_flow(mask):
-    """
-    mask 1 indicates valid pixel 0 indicates unknown pixel
-    """
-    B, T, C, H, W = mask.shape
-
-    # calculate relative position
-    grid_y, grid_x = torch.meshgrid(torch.arange(0, H), torch.arange(0, W))
-
-    grid_y, grid_x = grid_y.type_as(mask), grid_x.type_as(mask)
-    abs_relative_pos_y = H - torch.abs(grid_y[None, :, :] - grid_y[:, None, :])
-    relative_pos_y = H - (grid_y[None, :, :] - grid_y[:, None, :])
-
-    abs_relative_pos_x = W - torch.abs(grid_x[:, None, :] - grid_x[:, :, None])
-    relative_pos_x = W - (grid_x[:, None, :] - grid_x[:, :, None])
-
-    # calculate the nearest indices
-    pos_up = mask.unsqueeze(3).repeat(
-        1, 1, 1, H, 1, 1).flip(4) * abs_relative_pos_y[None, None, None] * (
-            relative_pos_y <= H)[None, None, None]
-    nearest_indice_up = pos_up.max(dim=4)[1]
-
-    pos_down = mask.unsqueeze(3).repeat(1, 1, 1, H, 1, 1) * abs_relative_pos_y[
-        None, None, None] * (relative_pos_y <= H)[None, None, None]
-    nearest_indice_down = (pos_down).max(dim=4)[1]
-
-    pos_left = mask.unsqueeze(4).repeat(
-        1, 1, 1, 1, W, 1).flip(5) * abs_relative_pos_x[None, None, None] * (
-            relative_pos_x <= W)[None, None, None]
-    nearest_indice_left = (pos_left).max(dim=5)[1]
-
-    pos_right = mask.unsqueeze(4).repeat(
-        1, 1, 1, 1, W, 1) * abs_relative_pos_x[None, None, None] * (
-            relative_pos_x <= W)[None, None, None]
-    nearest_indice_right = (pos_right).max(dim=5)[1]
-
-    # NOTE: IMPORTANT !!! depending on how to use this offset
-    initial_offset_up = -(nearest_indice_up - grid_y[None, None, None]).flip(3)
-    initial_offset_down = nearest_indice_down - grid_y[None, None, None]
-
-    initial_offset_left = -(nearest_indice_left -
-                            grid_x[None, None, None]).flip(4)
-    initial_offset_right = nearest_indice_right - grid_x[None, None, None]
-
-    # nearest_indice_x = (mask.unsqueeze(1).repeat(1, img_width, 1) * relative_pos_x).max(dim=2)[1]
-    # initial_offset_x = nearest_indice_x - grid_x
-
-    # handle the boundary cases
-    final_offset_down = (initial_offset_down < 0) * initial_offset_up + (
-        initial_offset_down > 0) * initial_offset_down
-    final_offset_up = (initial_offset_up > 0) * initial_offset_down + (
-        initial_offset_up < 0) * initial_offset_up
-    final_offset_right = (initial_offset_right < 0) * initial_offset_left + (
-        initial_offset_right > 0) * initial_offset_right
-    final_offset_left = (initial_offset_left > 0) * initial_offset_right + (
-        initial_offset_left < 0) * initial_offset_left
-    zero_offset = torch.zeros_like(final_offset_down)
-    # out = torch.cat([final_offset_left, zero_offset, final_offset_right, zero_offset, zero_offset, final_offset_up, zero_offset, final_offset_down], dim=2)
-    out = torch.cat([
-        zero_offset, final_offset_left, zero_offset, final_offset_right,
-        final_offset_up, zero_offset, final_offset_down, zero_offset
-    ],
-                    dim=2)
-
-    return out
+if __name__ == "__main__":
+    test_MFN()
