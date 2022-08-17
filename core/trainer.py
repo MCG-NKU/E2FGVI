@@ -49,7 +49,11 @@ class Trainer:
             type=self.config['losses']['GAN_LOSS'])
         self.adversarial_loss = self.adversarial_loss.to(self.config['device'])
         self.l1_loss = nn.L1Loss()
-        self.flow_comp_loss = FlowCompletionLoss().to(self.config['device'])
+
+        if config['model']['net'] == 'lite-MFN':
+            self.flow_comp_loss = FlowCompletionLoss(estimator='mfn').to(self.config['device'])
+        else:
+            self.flow_comp_loss = FlowCompletionLoss(estimator='spy').to(self.config['device'])     # default
 
         # setup models including generator and discriminator
         net = importlib.import_module('model.' + config['model']['net'])

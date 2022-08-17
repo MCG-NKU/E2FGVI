@@ -5,7 +5,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from model.modules.flow_comp import SPyNet
+# from model.modules.flow_comp import SPyNet
+from model.modules.flow_comp_MFN import MaskFlowNetS
 from model.modules.feat_prop import BidirectionalPropagation, SecondOrderDeformableAlignment
 from model.modules.tfocal_transformer_hq import TemporalFocalTransformerBlock, SoftSplit, SoftComp
 from model.modules.spectral_norm import spectral_norm as _spectral_norm
@@ -133,7 +134,7 @@ class deconv(nn.Module):
 
 
 class InpaintGenerator(BaseNetwork):
-    def __init__(self, init_weights=True, flow_align=False):
+    def __init__(self, init_weights=True, flow_align=True):
         super(InpaintGenerator, self).__init__()
         # channel = 256   # default
         # hidden = 512   # default
@@ -221,8 +222,7 @@ class InpaintGenerator(BaseNetwork):
                     m.init_offset()
 
         # flow completion network
-        self.update_spynet = SPyNet()   # default
-        # self.update_spynet = SPyNet(use_pretrain=False, module_level=3)   # light flow without init
+        self.update_MFN = MaskFlowNetS()
 
     def forward_bidirect_flow(self, masked_local_frames):
         b, l_t, c, h, w = masked_local_frames.size()
@@ -240,8 +240,8 @@ class InpaintGenerator(BaseNetwork):
             -1, c, h // 4, w // 4)
         mlf_2 = masked_local_frames[:, 1:, :, :, :].reshape(
             -1, c, h // 4, w // 4)
-        pred_flows_forward = self.update_spynet(mlf_1, mlf_2)
-        pred_flows_backward = self.update_spynet(mlf_2, mlf_1)
+        pred_flows_forward = self.update_MFN(mlf_1, mlf_2)
+        pred_flows_backward = self.update_MFN(mlf_2, mlf_1)
 
         pred_flows_forward = pred_flows_forward.view(b, l_t - 1, 2, h // 4,
                                                      w // 4)
