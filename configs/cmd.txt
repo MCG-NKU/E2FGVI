@@ -30,6 +30,24 @@ datasets/
 release_model/E2FGVI-CVPR22.pth
 --good_fusion
 
+# 测试e2fgvi bs2 250k
+--model
+e2fgvi
+--dataset
+davis
+--data_root
+datasets/
+--ckpt
+release_model/e2fgvi_ablation_e2fgvi_baseline/gen_250000.pth
+
+# 测试lite-MFN
+--model
+lite-MFN
+--dataset
+davis
+--data_root
+datasets/
+
 #####################################################
 新建会话：tmux new -s SESSION-NAME
 杀死会话：tmux kill-session -t 0
@@ -46,8 +64,9 @@ tensorboard --logdir='release_model/' --port=6006
 http://127.0.0.1:6006/
 ####################################################
 
-# 训练e2fgvi-bs2-250k
+# 训练e2fgvi-bs2-250k [已完成]
 python train.py -c configs/ablation_e2fgvi_baseline.json
+[davis]: Finish evaluation... Average Frame PSNR/SSIM/VFID: 30.65/0.9590/0.180
 
 # train_e2fgvi_hq-lite.json用于最终实验 bs6 3090单卡 250k 约110h
 
@@ -63,7 +82,7 @@ CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_e2fgvi_hq-lite-flow-a
 # 训练e2fgvi-lite bs2 3090单卡 250k back光流不对齐 SpyNet预训练初始化 [tmux 1] 用这个当作baseline 速度也在0.04s左右
 CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_e2fgvi_hq-lite-flow-init.json
 
-# 训练lite-MFN bs2 3090单卡 250k back光流对齐 maskflownetS [tmux 0] 约需要55h
+# 训练lite-MFN bs2 3090单卡 250k back光流对齐 maskflownetS [tmux 0] 约需要54.5h
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN.json
 
 # 训练lite-MFN bs2 3090单卡 250k back光流对齐 maskflownetS 拆掉后面的dcn对齐？ [未开始]

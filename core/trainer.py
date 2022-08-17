@@ -243,6 +243,7 @@ class Trainer:
             # save checkpoints
             torch.save(netG.state_dict(), gen_path)
             if not self.config['model']['no_dis']:
+                # 可以选择不存储判别器，opt存下来的是优化器的状态
                 torch.save(netD.state_dict(), dis_path)
                 torch.save(
                     {

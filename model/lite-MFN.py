@@ -264,8 +264,14 @@ class InpaintGenerator(BaseNetwork):
         fold_output_size = (h, w)
         local_feat = enc_feat.view(b, t, c, h, w)[:, :l_t, ...]
         ref_feat = enc_feat.view(b, t, c, h, w)[:, l_t:, ...]
-        local_feat = self.feat_prop_module(local_feat, pred_flows[0],
-                                           pred_flows[1])
+
+        # local_feat = self.feat_prop_module(local_feat, pred_flows[0],
+        #                                    pred_flows[1])       # pred_flows[0]的位置应当输入后向光流，pred_flows[1]的位置应当输入前向光流
+        # 可是self.forward_bidirect_flow返回来0是前向光流，1是反向光流。。。
+        # 更正前后向光流：
+        local_feat = self.feat_prop_module(local_feat, pred_flows[1],
+                                           pred_flows[0])
+
         enc_feat = torch.cat((local_feat, ref_feat), dim=1)
 
         # content hallucination through stacking multiple temporal focal transformer blocks

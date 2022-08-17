@@ -52,6 +52,7 @@ class SecondOrderDeformableAlignment(ModulatedDeformConv2d):
         # mask
         mask = torch.sigmoid(mask)
 
+        # 默认使用的2阶对齐方法是dcn-v2，也就是调制可变形卷积，所谓的调制就是新增了一个和图像等大的mask，范围在0-1
         return modulated_deform_conv2d(x, offset, mask, self.weight, self.bias,
                                        self.stride, self.padding,
                                        self.dilation, self.groups,
@@ -114,6 +115,8 @@ class BidirectionalPropagation(nn.Module):
 
                     if i > 0:
                         flow_n1 = flows[:, flow_idx[i], :, :, :]
+                        # cond是使用warp后的此前特征，n1表示光流第一次warp
+                        # 在backward里，作者想把 t5 warp 到 t4，但是用了 t1 到 t0 的光流，用错了
                         cond_n1 = flow_warp(feat_prop, flow_n1.permute(0, 2, 3, 1))
 
                         # initialize second-order features
@@ -150,7 +153,14 @@ class BidirectionalPropagation(nn.Module):
                     feat_current = feats['spatial'][mapping_idx[idx]]
 
                     if i > 0:
-                        flow_n1 = flows[:, flow_idx[idx], :, :, :]
+                        if 'backward' in module_name:
+                            flow_n1 = flows[:, flow_idx[idx]+1, :, :, :]
+                            # print('Backward, using back flow: (%f) for warp to frame (%f)'
+                            #       % (flow_idx[idx]+1, mapping_idx[idx]))
+                        else:
+                            flow_n1 = flows[:, flow_idx[i], :, :, :]
+                            # print('Forward, using forward flow: (%f) for warp to frame (%f)'
+                            #       % (flow_idx[i], mapping_idx[idx]))
                         cond_n1 = flow_warp(feat_prop, flow_n1.permute(0, 2, 3, 1))
 
                         # initialize second-order features
@@ -159,7 +169,14 @@ class BidirectionalPropagation(nn.Module):
                         cond_n2 = torch.zeros_like(cond_n1)
                         if i > 1:
                             feat_n2 = feats[module_name][-2]
-                            flow_n2 = flows[:, flow_idx[idx - 1], :, :, :]
+                            if 'backward' in module_name:
+                                flow_n2 = flows[:, flow_idx[idx]+2, :, :, :]
+                                # print('Backward, using second back flow: (%f) for warp to frame (%f)'
+                                #       % (flow_idx[idx] + 2, mapping_idx[idx]))
+                            else:
+                                flow_n2 = flows[:, flow_idx[i - 1], :, :, :]
+                                # print('Forward, using second forward flow: (%f) for warp to frame (%f)'
+                                #       % (flow_idx[i - 1], mapping_idx[idx]))
                             flow_n2 = flow_n1 + flow_warp(
                                 flow_n2, flow_n1.permute(0, 2, 3, 1))
                             cond_n2 = flow_warp(feat_n2,
@@ -183,6 +200,8 @@ class BidirectionalPropagation(nn.Module):
 
             if 'backward' in module_name:
                 feats[module_name] = feats[module_name][::-1]
+
+            # print('#' * 20)
 
         outputs = []
         for i in range(0, t):
