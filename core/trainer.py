@@ -57,7 +57,21 @@ class Trainer:
 
         # setup models including generator and discriminator
         net = importlib.import_module('model.' + config['model']['net'])
-        self.netG = net.InpaintGenerator()
+        if config['model']['net'] == 'lite-MFN':
+
+            if config['model']['skip_dcn'] != 0:
+                self.skip_dcn = True
+            else:
+                self.skip_dcn = False
+
+            if config['model']['flow_guide'] != 0:
+                self.flow_guide = True
+            else:
+                self.flow_guide = False
+
+            self.netG = net.InpaintGenerator(skip_dcn=self.skip_dcn, flow_guide=self.flow_guide)
+        else:
+            self.netG = net.InpaintGenerator()
         print(self.netG)
         self.netG = self.netG.to(self.config['device'])
         if not self.config['model']['no_dis']:

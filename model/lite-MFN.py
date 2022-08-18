@@ -8,7 +8,7 @@ import torch.nn.functional as F
 # from model.modules.flow_comp import SPyNet
 from model.modules.flow_comp_MFN import MaskFlowNetS
 from model.modules.feat_prop import BidirectionalPropagation, SecondOrderDeformableAlignment
-from model.modules.tfocal_transformer_hq import TemporalFocalTransformerBlock, SoftSplit, SoftComp
+from model.modules.tfocal_transformer_hq import TemporalFocalTransformerBlock, SoftSplit, SoftComp, SoftSplit_FlowGuide
 from model.modules.spectral_norm import spectral_norm as _spectral_norm
 
 
@@ -134,13 +134,15 @@ class deconv(nn.Module):
 
 
 class InpaintGenerator(BaseNetwork):
-    def __init__(self, init_weights=True, flow_align=True, skip_dcn=True):
+    def __init__(self, init_weights=True, flow_align=True, skip_dcn=False, flow_guide=False):
         super(InpaintGenerator, self).__init__()
         # channel = 256   # default
         # hidden = 512   # default
         channel = 64
         hidden = 128
         reduction = 2
+
+        self.flow_guide = flow_guide
 
         # encoder
         # self.encoder = Encoder()    # default
@@ -170,21 +172,30 @@ class InpaintGenerator(BaseNetwork):
         self.feat_prop_module = BidirectionalPropagation(channel // 2, flow_align=flow_align, skip_dcn=skip_dcn)
 
         # soft split and soft composition
-        kernel_size = (7, 7)
-        padding = (3, 3)
-        stride = (3, 3)
+        kernel_size = (7, 7)    # 滑块的大小
+        padding = (3, 3)    # 两个方向上隐式填0的数量
+        stride = (3, 3)     # 滑块的步长
         output_size = (60, 108)
         t2t_params = {
             'kernel_size': kernel_size,
             'stride': stride,
             'padding': padding
         }
-        self.ss = SoftSplit(channel // 2,
-                            hidden,
-                            kernel_size,
-                            stride,
-                            padding,
-                            t2t_param=t2t_params)
+        if not self.flow_guide:
+            self.ss = SoftSplit(channel // 2,
+                                hidden,
+                                kernel_size,
+                                stride,
+                                padding,
+                                t2t_param=t2t_params)
+        else:
+            # 使用光流引导patch embedding
+            self.ss = SoftSplit_FlowGuide(channel // 2,
+                                hidden,
+                                kernel_size,
+                                stride,
+                                padding,
+                                t2t_param=t2t_params)
         self.sc = SoftComp(channel // 2, hidden, kernel_size, stride, padding)
 
         n_vecs = 1
@@ -275,11 +286,15 @@ class InpaintGenerator(BaseNetwork):
         enc_feat = torch.cat((local_feat, ref_feat), dim=1)
 
         # content hallucination through stacking multiple temporal focal transformer blocks
-        trans_feat = self.ss(enc_feat.view(-1, c, h, w), b, fold_output_size)
-        trans_feat = self.transformer([trans_feat, fold_output_size])
+        if not self.flow_guide:
+            trans_feat = self.ss(enc_feat.view(-1, c, h, w), b, fold_output_size)   # [B, t, f_h, f_w, hidden]
+        else:
+            trans_feat = self.ss(enc_feat, b, c, fold_output_size,
+                                 pred_flows[0], pred_flows[1], l_t)
+        trans_feat = self.transformer([trans_feat, fold_output_size])   # temporal focal trans block
         trans_feat = self.sc(trans_feat[0], t, fold_output_size)
         trans_feat = trans_feat.view(b, t, -1, h, w)
-        enc_feat = enc_feat + trans_feat
+        enc_feat = enc_feat + trans_feat    # 残差链接
 
         # decode frames from features
         output = self.decoder(enc_feat.view(b * t, c, h, w))

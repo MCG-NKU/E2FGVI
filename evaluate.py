@@ -16,8 +16,8 @@ from core.dataset import TestDataset
 from core.metrics import calc_psnr_and_ssim, calculate_i3d_activations, calculate_vfid, init_i3d_model
 
 # global variables
-# w, h = 432, 240     # default acc. test setting in e2fgvi for davis dataset
-w, h = 864, 480     # davis res 480x854 default speed test setting in e2fgvi for davis dataset
+w, h = 432, 240     # default acc. test setting in e2fgvi for davis dataset
+# w, h = 864, 480     # davis res 480x854 default speed test setting in e2fgvi for davis dataset
 ref_length = 10     # non-local frames的步幅间隔，此处为每10帧取1帧NLF
 neighbor_stride = 5     # local frames的窗口大小，加上自身则窗口大小为6
 default_fps = 24
@@ -62,6 +62,10 @@ def main_worker(args):
 
     print('Start evaluation...')
 
+    if args.timing:
+        time_all = 0
+        len_all = 0
+
     # create results directory
     result_path = os.path.join('results', f'{args.model}_{args.dataset}')
     if not os.path.exists(result_path):
@@ -84,6 +88,9 @@ def main_worker(args):
         ]
         comp_frames = [None] * video_length     # 补全帧
 
+        if args.timing:
+            len_all += video_length
+
         # complete holes by our model
         for f in range(0, video_length, neighbor_stride):
             neighbor_ids = [
@@ -104,8 +111,9 @@ def main_worker(args):
                     torch.cuda.synchronize()
                     time_end = time.time()
                     time_sum = time_end - time_start
-                    print('Run Time: '
-                          f'{time_sum/len(neighbor_ids)}')
+                    time_all += time_sum
+                    # print('Run Time: '
+                    #       f'{time_sum/len(neighbor_ids)}')
 
                 pred_img = (pred_img + 1) / 2
                 pred_img = pred_img.cpu().permute(0, 2, 3, 1).numpy() * 255
@@ -178,6 +186,9 @@ def main_worker(args):
             f'[{index+1:3}/{len(test_loader)}] Name: {str(video_name):25} | PSNR/SSIM: {cur_psnr:.4f}/{cur_ssim:.4f}\n'
         )
 
+        if args.timing:
+            print('Average run time: (%f) per frame' % (time_all/len_all))
+
         # saving images for evaluating warpping errors
         if args.save_results:
             save_frame_path = os.path.join(result_path, video_name[0])
@@ -199,6 +210,9 @@ def main_worker(args):
         'Finish evaluation... Average Frame PSNR/SSIM/VFID: '
         f'{avg_frame_psnr:.2f}/{avg_frame_ssim:.4f}/{fid_score:.3f}')
     eval_summary.close()
+
+    if args.timing:
+        print('All average forward run time: (%f) per frame' % (time_all / len_all))
 
     return len(total_frame_psnr)
 
@@ -222,18 +236,18 @@ if __name__ == '__main__':
         profile = line_profiler.LineProfiler(main_worker)  # 把函数传递到性能分析器
         profile.enable()  # 开始分析
 
-    if args.timing:
-        torch.cuda.synchronize()
-        time_start = time.time()
+    # if args.timing:
+    #     torch.cuda.synchronize()
+    #     time_start = time.time()
 
     frame_num = main_worker(args)
 
-    if args.timing:
-        torch.cuda.synchronize()
-        time_end = time.time()
-        time_sum = time_end - time_start
-        print('Finish evaluation... Average Run Time: '
-              f'{time_sum/frame_num}')
+    # if args.timing:
+    #     torch.cuda.synchronize()
+    #     time_end = time.time()
+    #     time_sum = time_end - time_start
+    #     print('Finish evaluation... Average Run Time: '
+    #           f'{time_sum/frame_num}')
 
     if args.profile:
         profile.disable()  # 停止分析

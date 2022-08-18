@@ -32,18 +32,65 @@ class SoftSplit(nn.Module):
     def forward(self, x, b, output_size):
         f_h = int((output_size[0] + 2 * self.t2t_param['padding'][0] -
                    (self.t2t_param['kernel_size'][0] - 1) - 1) /
-                  self.t2t_param['stride'][0] + 1)
+                  self.t2t_param['stride'][0] + 1)      # token在竖直方向的个数
         f_w = int((output_size[1] + 2 * self.t2t_param['padding'][1] -
                    (self.t2t_param['kernel_size'][1] - 1) - 1) /
-                  self.t2t_param['stride'][1] + 1)
+                  self.t2t_param['stride'][1] + 1)      # token在水平方向的个数
 
-        feat = self.t2t(x)
-        feat = feat.permute(0, 2, 1)
+        feat = self.t2t(x)      # 把特征图划分为token(不含有可学习参数)，[B*t, C*token_h*token_w, f_h*f_w]
+        feat = feat.permute(0, 2, 1)    # [B*t, Num_token, Length_token]
         # feat shape [b*t, num_vec, ks*ks*c]
-        feat = self.embedding(feat)
+        feat = self.embedding(feat)     # [B*t, Num_token, hidden] 含参数
         # feat shape after embedding [b, t*num_vec, hidden]
-        feat = feat.view(b, -1, f_h, f_w, feat.size(2))
+        feat = feat.view(b, -1, f_h, f_w, feat.size(2))     # [B, t, f_h, f_w, hidden]
         return feat
+
+
+class SoftSplit_FlowGuide(nn.Module):
+    """
+    Using forward and backward flow to guide LOCAL trans feat embedding.
+    Using same embedding func for local and non local frames now.
+    """
+    def __init__(self, channel, hidden, kernel_size, stride, padding,
+                 t2t_param):
+        super(SoftSplit_FlowGuide, self).__init__()
+        self.kernel_size = kernel_size
+        self.t2t = nn.Unfold(kernel_size=kernel_size,
+                             stride=stride,
+                             padding=padding)
+        c_in = reduce((lambda x, y: x * y), kernel_size) * channel
+        self.embedding = nn.Linear(c_in, hidden)
+        self.embedding_with_flow = nn.Linear(c_in * 2 + c_in // channel * 4, hidden)  # addition channel of flow
+        # self.embedding_with_flow = nn.Linear(c_in, hidden)
+
+        self.t2t_param = t2t_param
+
+    def forward(self, x, b, c, output_size, flow_forward, flow_backward, local_t):
+        f_h = int((output_size[0] + 2 * self.t2t_param['padding'][0] -
+                   (self.t2t_param['kernel_size'][0] - 1) - 1) /
+                  self.t2t_param['stride'][0] + 1)      # token在竖直方向的个数
+        f_w = int((output_size[1] + 2 * self.t2t_param['padding'][1] -
+                   (self.t2t_param['kernel_size'][1] - 1) - 1) /
+                  self.t2t_param['stride'][1] + 1)      # token在水平方向的个数
+        h, w = output_size
+
+        x_non_local = torch.cat((x[:, local_t:, :, :, :], x[:, local_t // 2, :, :, :].unsqueeze(dim=1)), dim=1)   # local frame 与光流对齐后t少了一帧，因此non_local_frame多取1帧中间帧
+        local_feat = x[:, :local_t, :, :, :]
+        forward_local_feat = local_feat[:, :-1, :, :, :]
+        backward_local_feat = local_feat[:, 1:, :, :, :]
+        x_local = torch.cat((forward_local_feat, flow_forward,
+                             backward_local_feat, flow_backward), dim=2).view(-1, c*2+4, h, w)  # 2*channel + 2*flow
+        feat_local = self.t2t(x_local)
+        feat_local = feat_local.permute(0, 2, 1)
+        feat_non_local = self.t2t(x_non_local.view(-1, c, h, w))
+        feat_non_local = feat_non_local.permute(0, 2, 1)
+
+        feat_local = self.embedding_with_flow(feat_local)
+        feat_local = feat_local.view(b, -1, f_h, f_w, feat_local.size(2))
+        feat_non_local = self.embedding(feat_non_local)
+        feat_non_local = feat_non_local.view(b, -1, f_h, f_w, feat_non_local.size(2))
+
+        return torch.cat((feat_local, feat_non_local), dim=1)
 
 
 class SoftComp(nn.Module):
