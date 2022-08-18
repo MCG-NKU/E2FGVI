@@ -59,20 +59,66 @@ class SecondOrderDeformableAlignment(ModulatedDeformConv2d):
                                        self.deform_groups)
 
 
+class ConvBNReLU(nn.Module):
+    """Conv with BN and ReLU, used for Simple Second Fusion"""
+
+    def __init__(self,
+                 in_chan,
+                 out_chan,
+                 ks=3,
+                 stride=1,
+                 padding=1,
+                 *args,
+                 **kwargs):
+        super(ConvBNReLU, self).__init__()
+        self.conv = nn.Conv2d(
+            in_chan,
+            out_chan,
+            kernel_size=ks,
+            stride=stride,
+            padding=padding,
+            bias=False)
+        self.bn = torch.nn.BatchNorm2d(out_chan)
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.bn(x)
+        x = self.relu(x)
+        return x
+
+    def init_weight(self):
+        for ly in self.children():
+            if isinstance(ly, nn.Conv2d):
+                nn.init.kaiming_normal_(ly.weight, a=1)
+                if not ly.bias is None: nn.init.constant_(ly.bias, 0)
+
+
 class BidirectionalPropagation(nn.Module):
-    def __init__(self, channel, flow_align=False):
+    def __init__(self, channel, flow_align=False, skip_dcn=False):
         super(BidirectionalPropagation, self).__init__()
         modules = ['backward_', 'forward_']
-        self.deform_align = nn.ModuleDict()
+
         self.backbone = nn.ModuleDict()
         self.channel = channel
 
         # 使用正确的对齐方式(True), 使用默认对齐方式(False)
         self.flow_align = flow_align
 
+        # 跳过dcn，认为光流足够准，使用1x1卷积融合对齐的特征
+        self.skip_dcn = skip_dcn
+        if not self.skip_dcn:
+            self.deform_align = nn.ModuleDict()
+        else:
+            self.simple_fusion = nn.ModuleDict()
+
         for i, module in enumerate(modules):
-            self.deform_align[module] = SecondOrderDeformableAlignment(
-                2 * channel, channel, 3, padding=1, deform_groups=16)
+            if not self.skip_dcn:
+                self.deform_align[module] = SecondOrderDeformableAlignment(
+                    2 * channel, channel, 3, padding=1, deform_groups=16)
+            else:
+                self.simple_fusion[module] = ConvBNReLU(in_chan=3 * channel, out_chan=channel,
+                                                        ks=1, stride=1, padding=0)
 
             self.backbone[module] = nn.Sequential(
                 nn.Conv2d((2 + i) * channel, channel, 3, 1, 1),
@@ -183,10 +229,14 @@ class BidirectionalPropagation(nn.Module):
                                                 flow_n2.permute(0, 2, 3, 1))
 
                         cond = torch.cat([cond_n1, feat_current, cond_n2], dim=1)
-                        feat_prop = torch.cat([feat_prop, feat_n2], dim=1)
-                        feat_prop = self.deform_align[module_name](feat_prop, cond,
-                                                                   flow_n1,
-                                                                   flow_n2)
+                        if not self.skip_dcn:
+                            feat_prop = torch.cat([feat_prop, feat_n2], dim=1)
+                            feat_prop = self.deform_align[module_name](feat_prop, cond,
+                                                                       flow_n1,
+                                                                       flow_n2)
+                        else:
+                            # 认为两次光流对齐足够准，直接将对齐后的特征用1x1卷积融合
+                            feat_prop = self.simple_fusion[module_name](cond)
 
                     feat = [feat_current] + [
                         feats[k][idx]

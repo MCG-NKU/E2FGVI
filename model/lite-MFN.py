@@ -134,7 +134,7 @@ class deconv(nn.Module):
 
 
 class InpaintGenerator(BaseNetwork):
-    def __init__(self, init_weights=True, flow_align=True):
+    def __init__(self, init_weights=True, flow_align=True, skip_dcn=True):
         super(InpaintGenerator, self).__init__()
         # channel = 256   # default
         # hidden = 512   # default
@@ -167,7 +167,7 @@ class InpaintGenerator(BaseNetwork):
         #     nn.Conv2d(64//reduction, 3, kernel_size=3, stride=1, padding=1))
 
         # feature propagation module
-        self.feat_prop_module = BidirectionalPropagation(channel // 2, flow_align=flow_align)
+        self.feat_prop_module = BidirectionalPropagation(channel // 2, flow_align=flow_align, skip_dcn=skip_dcn)
 
         # soft split and soft composition
         kernel_size = (7, 7)

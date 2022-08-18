@@ -82,8 +82,9 @@ CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_e2fgvi_hq-lite-flow-a
 # 训练e2fgvi-lite bs2 3090单卡 250k back光流不对齐 SpyNet预训练初始化 [tmux 1] 用这个当作baseline 速度也在0.04s左右
 CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_e2fgvi_hq-lite-flow-init.json
 
-# 训练lite-MFN bs2 3090单卡 250k back光流对齐 maskflownetS [tmux 0] 约需要54.5h
+# 训练lite-MFN bs2 3090单卡 250k back光流真对齐 maskflownetS [tmux 0] 约需要54.5h
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN.json
 
-# 训练lite-MFN bs2 3090单卡 250k back光流对齐 maskflownetS 拆掉后面的dcn对齐？ [未开始]
+# 训练lite-MFN bs2 3090单卡 250k back光流真对齐 maskflownetS 拆掉后面的dcn对齐 认为光流对齐足够精准 [3090] 约需要41.5h
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-WoDCN.json
 
