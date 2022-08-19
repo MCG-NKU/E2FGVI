@@ -5,7 +5,9 @@
     [2] Tokens-to-Token ViT: Training Vision Transformers from Scratch on ImageNet, ICCV 2021
         https://github.com/yitu-opensource/T2T-ViT
     [3] Focal Self-attention for Local-Global Interactions in Vision Transformers, NeurIPS 2021
-        https://github.com/microsoft/Focal-Transformer       
+        https://github.com/microsoft/Focal-Transformer
+    [4] Self-slimmed Vision Transformer, ECCV 2022
+        https://github.com/Sense-X/SiT
 """
 
 import math
@@ -93,7 +95,83 @@ class SoftSplit_FlowGuide(nn.Module):
         return torch.cat((feat_local, feat_non_local), dim=1)
 
 
+class TokenSlimmingModule(nn.Module):
+    r"""Token Slim Module from SiT.
+        Revised by Hao:
+        Add token fusion for video inpainting support.
+        Slightly change input and output dim, and ratio."""
+    def __init__(self, dim, keeped_patches, ratio=0.5625):
+        super().__init__()
+        hidden_dim = int(dim * ratio)
+        self.weight = nn.Sequential(
+            nn.LayerNorm(dim),
+            nn.Linear(dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, keeped_patches))
+        self.scale = nn.Parameter(torch.ones(1, 1, 1))
+
+    def forward(self, x):
+        b, t, num_h, num_w, hidden = x.shape
+        x = x.view(b*t, -1, hidden)     # B*T, Num_Token, C
+
+        weight = self.weight(x)
+        weight = F.softmax(weight * self.scale, dim=1).transpose(2, 1)
+        x = torch.bmm(weight, x)
+
+        x = x.view(b, t, int(num_h * 0.75), int(num_w * 0.75), hidden)  # 两个方向上各自缩减25%的token
+        return x
+
+
+class ReverseTSM(nn.Module):
+    r"""Reverse Token Slim Module from SiT.
+        Revised by Hao:
+        Add token fusion for video inpainting support.
+        Slightly change input and output dim, and ratio."""
+    def __init__(self, dim, keeped_patches, recovered_patches, ratio=4.):
+        super().__init__()
+        self.norm1 = nn.LayerNorm(dim)
+        self.mlp1 = Mlp(keeped_patches, int(recovered_patches*ratio), recovered_patches)
+        self.norm2 = nn.LayerNorm(dim)
+        self.mlp2 = Mlp(dim, int(dim*ratio), dim)
+    def forward(self, x):
+        b, t, num_h, num_w, hidden = x.shape
+        x = x.view(b*t, -1, hidden)     # B*T, Num_Token, C
+
+        x = self.norm1(x)
+        x = self.mlp1(x.transpose(2, 1))
+        x = x.transpose(2, 1)
+        x = x + self.mlp2(self.norm2(x))
+
+        x = x.view(b, t, int(num_h * 4 // 3), int(num_w * 4 // 3), hidden)  # 两个方向上各自缩减25%的token
+        return x
+
+
+class Mlp(nn.Module):
+    '''
+    MLP with support to use group linear operator
+    '''
+    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
+        super().__init__()
+        out_features = out_features or in_features
+        hidden_features = hidden_features or in_features
+        self.fc1 = nn.Linear(in_features, hidden_features)
+        self.fc2 = nn.Linear(hidden_features, out_features)
+        self.act = act_layer()
+        self.drop = nn.Dropout(drop)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.act(x)
+        x = self.drop(x)
+        x = self.fc2(x)
+        x = self.drop(x)
+        return x
+
+
 class SoftComp(nn.Module):
+    r"""Revised by Hao:
+        Add token fusion for video inpainting support.
+        Transfer x to contiguous before view operation"""
     def __init__(self, channel, hidden, kernel_size, stride, padding):
         super(SoftComp, self).__init__()
         self.relu = nn.LeakyReLU(0.2, inplace=True)
@@ -113,7 +191,7 @@ class SoftComp(nn.Module):
 
     def forward(self, x, t, output_size):
         b_, _, _, _, c_ = x.shape
-        x = x.view(b_, -1, c_)
+        x = x.contiguous().view(b_, -1, c_)
         feat = self.embedding(x)
         b, _, c = feat.size()
         feat = feat.view(b * t, -1, c).permute(0, 2, 1)
@@ -475,7 +553,7 @@ class WindowAttention(nn.Module):
 class TemporalFocalTransformerBlock(nn.Module):
     r""" Temporal Focal Transformer Block.
     Args:
-        dim (int): Number of input channels.
+        dim (int): Number of input channels. Equal to hidden dim.
         num_heads (int): Number of attention heads.
         window_size (tuple[int]): Window size.
         shift_size (int): Shift size for SW-MSA.
@@ -486,6 +564,9 @@ class TemporalFocalTransformerBlock(nn.Module):
         focal_window (int):  Window size of each focal window.
         n_vecs (int): Required for F3N.
         t2t_params (int): T2T parameters for F3N.
+    Revised by Hao:
+        Add token fusion support.
+        token_fusion (bool):  Required for Token Fusion Manner.
     """
     def __init__(self,
                  dim,
@@ -498,16 +579,18 @@ class TemporalFocalTransformerBlock(nn.Module):
                  focal_window=(5, 9),
                  norm_layer=nn.LayerNorm,
                  n_vecs=None,
-                 t2t_params=None):
+                 t2t_params=None,
+                 token_fusion=False):
         super().__init__()
         self.dim = dim
         self.num_heads = num_heads
         self.window_size = window_size
-        self.expand_size = tuple(i // 2 for i in window_size)  # TODO
+        self.expand_size = tuple(i // 2 for i in window_size)  # 窗口大小除以2是拓展大小
         self.mlp_ratio = mlp_ratio
         self.pool_method = pool_method
         self.focal_level = focal_level
         self.focal_window = focal_window
+        self.token_fusion = token_fusion
 
         self.window_size_glo = self.window_size
 
@@ -583,13 +666,13 @@ class TemporalFocalTransformerBlock(nn.Module):
 
                 x_windows_noreshape = window_partition_noreshape(
                     x_level_k.contiguous(), window_size_glo
-                )  # B, nw, nw, T, window_size, window_size, C
+                )  # B, nWh, nWw, T, window_size_h, window_size_w, C
                 nWh, nWw = x_windows_noreshape.shape[1:3]
                 x_windows_noreshape = x_windows_noreshape.view(
                     B, nWh, nWw, T, window_size_glo[0] * window_size_glo[1],
-                    C).transpose(4, 5)  # B, nWh, nWw, T, C, wsize**2
+                    C).transpose(4, 5)  # B, nWh, nWw, T, C, window_size_h*window_size_w
                 x_windows_pooled = self.pool_layers[k](
-                    x_windows_noreshape).flatten(-2)  # B, nWh, nWw, T, C
+                    x_windows_noreshape).flatten(-2)  # B, nWh, nWw, T, C | window被池化聚合
 
                 x_windows_all += [x_windows_pooled]
                 x_window_masks_all += [None]
@@ -599,14 +682,19 @@ class TemporalFocalTransformerBlock(nn.Module):
 
         # merge windows
         attn_windows = attn_windows.view(-1, T, self.window_size[0],
-                                         self.window_size[1], C)
+                                         self.window_size[1], C)    # _, T, nWh, nWw, C
         shifted_x = window_reverse(attn_windows, self.window_size, T, H,
-                                   W)  # B T H' W' C
+                                   W)  # B T H' W' C, 从window格式变回token格式
 
         # FFN
         x = shortcut + shifted_x
         y = self.norm2(x)
-        x = x + self.mlp(y.view(B, T * H * W, C), output_size).view(
-            B, T, H, W, C)
+        if not self.token_fusion:
+            # default manner
+            x = x + self.mlp(y.view(B, T * H * W, C), output_size).view(
+                B, T, H, W, C)
+        else:
+            x = x + self.mlp(y.view(B, T * H * W, C), (H * 3, W * 3)).view(
+                B, T, H, W, C)
 
         return x, output_size

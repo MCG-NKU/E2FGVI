@@ -8,7 +8,8 @@ import torch.nn.functional as F
 # from model.modules.flow_comp import SPyNet
 from model.modules.flow_comp_MFN import MaskFlowNetS
 from model.modules.feat_prop import BidirectionalPropagation, SecondOrderDeformableAlignment
-from model.modules.tfocal_transformer_hq import TemporalFocalTransformerBlock, SoftSplit, SoftComp, SoftSplit_FlowGuide
+from model.modules.tfocal_transformer_hq import TemporalFocalTransformerBlock, SoftSplit, SoftComp,\
+    SoftSplit_FlowGuide, TokenSlimmingModule, ReverseTSM
 from model.modules.spectral_norm import spectral_norm as _spectral_norm
 
 
@@ -134,15 +135,21 @@ class deconv(nn.Module):
 
 
 class InpaintGenerator(BaseNetwork):
-    def __init__(self, init_weights=True, flow_align=True, skip_dcn=False, flow_guide=False):
+    def __init__(self, init_weights=True, flow_align=True, skip_dcn=False, flow_guide=False, token_fusion=False):
         super(InpaintGenerator, self).__init__()
-        # channel = 256   # default
-        # hidden = 512   # default
-        channel = 64
-        hidden = 128
-        reduction = 2
+        channel = 256   # default
+        hidden = 512    # default
+        reduction = 1   # default
+        # channel = 64
+        # hidden = 128
+        # reduction = 2
+
+        depths = 8  # default
+        # depths = 4   # 0.09s/frame
+        # depths = 2   # 0.08s/frame, 0.07s/frame with hidden = 128,
 
         self.flow_guide = flow_guide
+        self.token_fusion = token_fusion
 
         # encoder
         # self.encoder = Encoder()    # default
@@ -198,32 +205,76 @@ class InpaintGenerator(BaseNetwork):
                                 t2t_param=t2t_params)
         self.sc = SoftComp(channel // 2, hidden, kernel_size, stride, padding)
 
-        n_vecs = 1
+        n_vecs = 1  # 计算token的数量
         for i, d in enumerate(kernel_size):
             n_vecs *= int((output_size[i] + 2 * padding[i] -
                            (d - 1) - 1) / stride[i] + 1)
 
         blocks = []
-        # depths = 8  # default
-        # depths = 4   # 0.09s/frame
-        depths = 2   # 0.08s/frame, 0.07s/frame with hidden = 128,
         num_heads = [4] * depths
         window_size = [(5, 9)] * depths
         focal_windows = [(5, 9)] * depths
         focal_levels = [2] * depths
         pool_method = "fc"
 
-        for i in range(depths):
-            blocks.append(
-                TemporalFocalTransformerBlock(dim=hidden,
-                                              num_heads=num_heads[i],
-                                              window_size=window_size[i],
-                                              focal_level=focal_levels[i],
-                                              focal_window=focal_windows[i],
-                                              n_vecs=n_vecs,
-                                              t2t_params=t2t_params,
-                                              pool_method=pool_method))
-        self.transformer = nn.Sequential(*blocks)
+        if self.token_fusion:
+            # 融合相似度高的token来降低计算复杂度
+            # 以下为token缩减层和token恢复层
+            self.rtsm = nn.ModuleList()
+            self.tsm = nn.ModuleList()
+
+            num_patches = n_vecs    # 原始的token数量
+            keeping_ratio = 0.5625  # 0.75*0.75
+
+            # self.keeped_patches = [int(num_patches * ((keeping_ratio) ** i)) for i in range(depths)]
+            self.keeped_patches = [int(num_patches * keeping_ratio)] * depths
+            self.layer_patches = []
+            self.stage_blocks = 1
+            self.slim_index = []
+
+            for i in range(depths):
+                self.layer_patches += self.stage_blocks * [self.keeped_patches[i]]
+            self.layer_patches += self.stage_blocks * [self.keeped_patches[-1]]
+
+            for i in range(1, depths):
+                self.tsm.append(TokenSlimmingModule(hidden, self.keeped_patches[i]))
+                self.slim_index.append(i)
+
+            dropped_token = 0
+            for i in range(depths):
+                dropped_token = max(dropped_token, num_patches - self.layer_patches[i + 1])
+                if dropped_token > 0:
+                    self.rtsm.append(ReverseTSM(hidden, self.layer_patches[i + 1], num_patches))
+                else:
+                    self.rtsm.append(nn.Identity())
+
+        if not self.token_fusion:
+            # default temporal focal transformer
+            for i in range(depths):
+                blocks.append(
+                    TemporalFocalTransformerBlock(dim=hidden,
+                                                  num_heads=num_heads[i],
+                                                  window_size=window_size[i],
+                                                  focal_level=focal_levels[i],
+                                                  focal_window=focal_windows[i],
+                                                  n_vecs=n_vecs,
+                                                  t2t_params=t2t_params,
+                                                  pool_method=pool_method))
+            self.transformer = nn.Sequential(*blocks)
+        else:
+            # 根据token聚合指数修改temporal focal transformer
+            for i in range(depths):
+                blocks.append(
+                    TemporalFocalTransformerBlock(dim=hidden,
+                                                  num_heads=num_heads[i],
+                                                  window_size=window_size[i],
+                                                  focal_level=focal_levels[i],
+                                                  focal_window=focal_windows[i],
+                                                  n_vecs=self.keeped_patches,
+                                                  t2t_params=t2t_params,
+                                                  pool_method=pool_method,
+                                                  token_fusion=True))
+            self.transformer = nn.Sequential(*blocks)
 
         if init_weights:
             self.init_weights()
@@ -291,8 +342,27 @@ class InpaintGenerator(BaseNetwork):
         else:
             trans_feat = self.ss(enc_feat, b, c, fold_output_size,
                                  pred_flows[0], pred_flows[1], l_t)
-        trans_feat = self.transformer([trans_feat, fold_output_size])   # temporal focal trans block
-        trans_feat = self.sc(trans_feat[0], t, fold_output_size)
+
+        if self.token_fusion:
+            # 融合相似度高的token来降低计算复杂度
+            tokens = trans_feat
+            for i, blk in enumerate(self.transformer):
+                # tokens, fold_output_size = blk([tokens, fold_output_size])
+                if (i + 1) in self.slim_index:
+                    tsm = self.tsm[self.slim_index.index(i + 1)]
+                    # token 聚合
+                    tokens = tsm(tokens)
+
+                    tokens, fold_output_size = blk([tokens, fold_output_size])
+
+                    # token 恢复
+                    tokens = self.rtsm[i](tokens)
+            trans_feat = tokens
+            trans_feat = self.sc(trans_feat, t, fold_output_size)
+        else:
+            trans_feat = self.transformer([trans_feat, fold_output_size])   # temporal focal trans block
+            trans_feat = self.sc(trans_feat[0], t, fold_output_size)
+
         trans_feat = trans_feat.view(b, t, -1, h, w)
         enc_feat = enc_feat + trans_feat    # 残差链接
 

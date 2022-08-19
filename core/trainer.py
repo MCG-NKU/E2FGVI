@@ -69,7 +69,13 @@ class Trainer:
             else:
                 self.flow_guide = False
 
-            self.netG = net.InpaintGenerator(skip_dcn=self.skip_dcn, flow_guide=self.flow_guide)
+            if config['model']['token_fusion'] != 0:
+                self.token_fusion = True
+            else:
+                self.token_fusion = False
+
+            self.netG = net.InpaintGenerator(
+                skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion)
         else:
             self.netG = net.InpaintGenerator()
         print(self.netG)

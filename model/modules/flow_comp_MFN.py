@@ -7,8 +7,6 @@ from mmflow.apis import init_model, inference_model
 
 class MaskFlowNetS(nn.Module):
     """MaskFlowNetS network structure.
-    The difference to the MaskFlowNetS is that
-        1.
     Paper:
         MaskFlownet: Asymmetric Feature Matching With Learnable Occlusion Mask, CVPR, 2020
     Args:
