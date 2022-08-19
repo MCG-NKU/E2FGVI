@@ -18,7 +18,9 @@
     },
     "model": {
         "net": "lite-MFN",
-        "no_dis": 0
+        "no_dis": 0,
+        "skip_dcn": 1,
+        "flow_guide": 0
     },
     "trainer": {
         "type": "Adam",
