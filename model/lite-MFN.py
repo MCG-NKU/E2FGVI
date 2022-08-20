@@ -135,7 +135,8 @@ class deconv(nn.Module):
 
 
 class InpaintGenerator(BaseNetwork):
-    def __init__(self, init_weights=True, flow_align=True, skip_dcn=False, flow_guide=False, token_fusion=False):
+    def __init__(self, init_weights=True, flow_align=True, skip_dcn=False, flow_guide=False, token_fusion=False,
+                 token_fusion_simple=False):
         super(InpaintGenerator, self).__init__()
         # channel = 256   # default
         # hidden = 512    # default
@@ -150,6 +151,7 @@ class InpaintGenerator(BaseNetwork):
 
         self.flow_guide = flow_guide
         self.token_fusion = token_fusion
+        self.token_fusion_simple = token_fusion_simple
 
         # encoder
         # self.encoder = Encoder()    # default
@@ -236,15 +238,27 @@ class InpaintGenerator(BaseNetwork):
                 self.layer_patches += self.stage_blocks * [self.keeped_patches[i]]
             self.layer_patches += self.stage_blocks * [self.keeped_patches[-1]]
 
-            for i in range(1, depths):
-                self.tsm.append(TokenSlimmingModule(hidden, self.keeped_patches[i]))
-                self.slim_index.append(i)
+            if not token_fusion_simple:
+                # 每个trans block前面一个token缩减，后面一个token复原
+                for i in range(1, depths):
+                    self.tsm.append(TokenSlimmingModule(hidden, self.keeped_patches[i]))
+                    self.slim_index.append(i)
 
-            dropped_token = 0
-            for i in range(depths):
-                dropped_token = max(dropped_token, num_patches - self.layer_patches[i + 1])
+                dropped_token = 0
+                for i in range(depths):
+                    dropped_token = max(dropped_token, num_patches - self.layer_patches[i + 1])
+                    if dropped_token > 0:
+                        self.rtsm.append(ReverseTSM(hidden, self.layer_patches[i + 1], num_patches))
+                    else:
+                        self.rtsm.append(nn.Identity())
+            else:
+                # 所有的trans block共用一个token缩减和一个token复原
+                self.tsm.append(TokenSlimmingModule(hidden, self.keeped_patches[1]))
+                self.slim_index.append(1)
+
+                dropped_token = max(0, num_patches - self.layer_patches[1])
                 if dropped_token > 0:
-                    self.rtsm.append(ReverseTSM(hidden, self.layer_patches[i + 1], num_patches))
+                    self.rtsm.append(ReverseTSM(hidden, self.layer_patches[1], num_patches))
                 else:
                     self.rtsm.append(nn.Identity())
 
@@ -346,17 +360,28 @@ class InpaintGenerator(BaseNetwork):
         if self.token_fusion:
             # 融合相似度高的token来降低计算复杂度
             tokens = trans_feat
-            for i, blk in enumerate(self.transformer):
-                # tokens, fold_output_size = blk([tokens, fold_output_size])
-                if (i + 1) in self.slim_index:
-                    tsm = self.tsm[self.slim_index.index(i + 1)]
-                    # token 聚合
-                    tokens = tsm(tokens)
+            if not self.token_fusion_simple:
+                # 每个trans block前面一个token缩减，后面一个token复原
+                for i, blk in enumerate(self.transformer):
+                    # tokens, fold_output_size = blk([tokens, fold_output_size])
+                    if (i + 1) in self.slim_index:
+                        tsm = self.tsm[self.slim_index.index(i + 1)]
+                        # token 聚合
+                        tokens = tsm(tokens)
+                        # trans block
+                        tokens, fold_output_size = blk([tokens, fold_output_size])
+                        # token 恢复
+                        tokens = self.rtsm[i](tokens)
+            else:
+                # 所有的trans block共用一个token缩减和一个token复原
+                tsm = self.tsm[self.slim_index.index(1)]
+                # token 聚合
+                tokens = tsm(tokens)
+                # trans block
+                tokens, fold_output_size = self.transformer([tokens, fold_output_size])   # temporal focal trans block
+                # token 恢复
+                tokens = self.rtsm[0](tokens)
 
-                    tokens, fold_output_size = blk([tokens, fold_output_size])
-
-                    # token 恢复
-                    tokens = self.rtsm[i](tokens)
             trans_feat = tokens
             trans_feat = self.sc(trans_feat, t, fold_output_size)
         else:

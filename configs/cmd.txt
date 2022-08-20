@@ -113,9 +113,12 @@ CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --dataset davis --dat
 All average forward run time: (0.052142) per frame
 All average forward run time: (0.050412) per frame [矩池云3090]
 
-# 训练lite-MFN bs2 3090单卡 250k back光流真对齐 maskflownetS 拆掉后面的dcn对齐 认为光流对齐足够精准 [暂停140k] 约需要41.5h
+# 训练lite-MFN bs2 3090单卡 250k back光流真对齐 maskflownetS 拆掉后面的dcn对齐 认为光流对齐足够精准 [已完成] 约需要41.5h
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-WoDCN.json
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --ckpt release_model/lite-MFN_ablation_lite-MFN-WoDCN\gen_250000.pth --good_fusion --timing
 [140k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.62/0.9357/0.225 已经超过了250k的baseline，乐
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.06/0.9408/0.224     # PSNR提升0.44
+All average forward run time: (0.069357) per frame [本地3090]
 All average forward run time: (0.047785) per frame [矩池云3090]
 
 # 训练lite-MFN bs2 3090单卡 250k back光流真对齐 maskflownetS 光流引导patch embedding [tmux 1] 约需要55h
@@ -130,4 +133,8 @@ All average forward run time: (0.093530) per frame [矩池云3090]
 # 测试使用 MaskFlowNetS 替换掉 SpyNet 后, token fusion 0.75*0.75的E2FGVI速度（与官方测试方法一致）
 All average forward run time: (0.072565) per frame [矩池云3090]
 
-# 训练token缩减0.75*0.75的lite-MFN
+# 训练token缩减0.75*0.75的lite-MFN (E2FGVI-lite+MaskFlowNetS+token-spatial-fusion0.75x0.75) [tmux 0] 约需要52h
+python train.py -c configs/ablation_lite-MFN-token-fusion.json
+
+# 训练token缩减0.75*0.75的lite-MFN 共用1个token缩减和拓展模块 (E2FGVI-lite+MaskFlowNetS+token-spatial-fusion0.75x0.75) [本地3090] 越需要43.5h
+python train.py -c configs/ablation_lite-MFN-token-fusion-simple.json
