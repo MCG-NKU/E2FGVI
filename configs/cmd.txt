@@ -75,6 +75,8 @@ ssh -p 29837 -NL 8008:localhost:6006 root@hz-t2.matpool.com
 输入密码后会卡死，直接新开一个终端启动tb就好了
 
 # 打开tb
+退出环境：conda deactivate
+cd /mnt/WORKSPACE/E2FGVI-hao/
 tensorboard --logdir='release_model/' --port=6006
 http://127.0.0.1:8008/
 ####################################################
@@ -103,11 +105,13 @@ CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_e2fgvi_hq-lite-flow-i
 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.61/0.9379/0.230
 All average forward run time: (0.030172) per frame [矩池云3090]
 
-# 训练lite-MFN bs2 3090单卡 250k back光流真对齐 maskflownetS [tmux 0] 约需要54.5h
+# 训练lite-MFN bs2 3090单卡 250k back光流真对齐 maskflownetS [已完成] 约需要54.5h
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN.json
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --ckpt release_model/lite-MFN_ablation_lite-MFN/gen_250000.pth --good_fusion --timing
 [95k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.43/0.9356/0.241
-All average forward run time: (0.052142) per frame [本地3090]
-All average forward run time: (0.051637) per frame [矩池云3090]
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.11/0.9443/0.214     # PSNR提升0.5
+All average forward run time: (0.052142) per frame
+All average forward run time: (0.050412) per frame [矩池云3090]
 
 # 训练lite-MFN bs2 3090单卡 250k back光流真对齐 maskflownetS 拆掉后面的dcn对齐 认为光流对齐足够精准 [暂停140k] 约需要41.5h
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-WoDCN.json

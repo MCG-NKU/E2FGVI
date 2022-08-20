@@ -137,16 +137,16 @@ class deconv(nn.Module):
 class InpaintGenerator(BaseNetwork):
     def __init__(self, init_weights=True, flow_align=True, skip_dcn=False, flow_guide=False, token_fusion=False):
         super(InpaintGenerator, self).__init__()
-        channel = 256   # default
-        hidden = 512    # default
-        reduction = 1   # default
-        # channel = 64
-        # hidden = 128
-        # reduction = 2
+        # channel = 256   # default
+        # hidden = 512    # default
+        # reduction = 1   # default
+        channel = 64
+        hidden = 128
+        reduction = 2
 
-        depths = 8  # default
+        # depths = 8  # default
         # depths = 4   # 0.09s/frame
-        # depths = 2   # 0.08s/frame, 0.07s/frame with hidden = 128,
+        depths = 2   # 0.08s/frame, 0.07s/frame with hidden = 128,
 
         self.flow_guide = flow_guide
         self.token_fusion = token_fusion
