@@ -79,9 +79,14 @@ class Trainer:
             else:
                 self.token_fusion_simple = False
 
+            if config['model']['fusion_skip_connect'] != 0:
+                self.fusion_skip_connect = True
+            else:
+                self.fusion_skip_connect = False
+
             self.netG = net.InpaintGenerator(
                 skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,
-                token_fusion_simple=self.token_fusion_simple)
+                token_fusion_simple=self.token_fusion_simple, fusion_skip_connect=self.fusion_skip_connect)
         else:
             self.netG = net.InpaintGenerator()
         print(self.netG)

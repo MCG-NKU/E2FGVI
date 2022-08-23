@@ -102,7 +102,7 @@ CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_e2fgvi_hq-lite-flow-a
 CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_e2fgvi_hq-lite-flow-init.json
 [95k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.35/0.9362/0.247
 [140k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 27.76/0.9323/0.256
-[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.61/0.9379/0.230
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.61/0.9379/0.230     # Baseline: 28.61
 All average forward run time: (0.030172) per frame [矩池云3090]
 
 # 训练lite-MFN bs2 3090单卡 250k back光流真对齐 maskflownetS [已完成] 约需要54.5h
@@ -121,10 +121,12 @@ CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --dataset davis --dat
 All average forward run time: (0.069357) per frame [本地3090]
 All average forward run time: (0.047785) per frame [矩池云3090]
 
-# 训练lite-MFN bs2 3090单卡 250k back光流真对齐 maskflownetS 光流引导patch embedding [tmux 1] 约需要55h
+# 训练lite-MFN bs2 3090单卡 250k back光流真对齐 maskflownetS 光流引导patch embedding [已完成] 需要58.3h
 CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_lite-MFN-flow-guide.json
 这里直接把local frame的光流接到了local frame的后面，forward对应forward，backward对应backward，
 local frame 与光流对齐后t少了一帧，因此non_local_frame多取1帧中间帧; 另外注意代码里常常会把batch和t合并成为bt一个通道
+CUDA_VISIBLE_DEVICES=1 python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --ckpt release_model/lite-MFN_ablation_lite-MFN-flow-guide/gen_250000.pth --good_fusion --timing
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.01/0.9347/0.260     # 不如baseline，可能是由于编码行为不一致导致的
 All average forward run time: (0.051672) per frame [矩池云3090]
 
 # 测试使用 MaskFlowNetS 替换掉 SpyNet 后的E2FGVI速度（与官方测试方法一致）
@@ -133,8 +135,15 @@ All average forward run time: (0.093530) per frame [矩池云3090]
 # 测试使用 MaskFlowNetS 替换掉 SpyNet 后, token fusion 0.75*0.75的E2FGVI速度（与官方测试方法一致）
 All average forward run time: (0.072565) per frame [矩池云3090]
 
-# 训练token缩减0.75*0.75的lite-MFN (E2FGVI-lite+MaskFlowNetS+token-spatial-fusion0.75x0.75) [tmux 0] 约需要52h
+# 训练token缩减0.75*0.75的lite-MFN (E2FGVI-lite+MaskFlowNetS+token-spatial-fusion0.75x0.75) [已完成] 约需要52h
+[95k 后由单卡转为双卡训练] 可能因为bs只有2所以双卡也只快了30%左右
 python train.py -c configs/ablation_lite-MFN-token-fusion.json
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --ckpt release_model/lite-MFN_ablation_lite-MFN-token-fusion/gen_250000.pth --good_fusion --timing
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.42/0.9376/0.244     # PSNR降低0.19
+All average forward run time: (0.048722) per frame [矩池云3090]
 
-# 训练token缩减0.75*0.75的lite-MFN 共用1个token缩减和拓展模块 (E2FGVI-lite+MaskFlowNetS+token-spatial-fusion0.75x0.75) [本地3090] 越需要43.5h
+# 训练token缩减0.75*0.75的lite-MFN 共用1个token缩减和拓展模块 (E2FGVI-lite+MaskFlowNetS+token-spatial-fusion0.75x0.75) [已完成] 需要43.5h
 python train.py -c configs/ablation_lite-MFN-token-fusion-simple.json
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --ckpt release_model/lite-MFN_ablation_lite-MFN-token-fusion-simple/gen_250000.pth --good_fusion --timing
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.48/0.9372/0.255     # PSNR降低0.13
+All average forward run time: (0.071416) per frame  [本地3090]

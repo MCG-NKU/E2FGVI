@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from model.modules.flow_comp_MFN import MaskFlowNetS
 from model.modules.feat_prop import BidirectionalPropagation, SecondOrderDeformableAlignment
 from model.modules.tfocal_transformer_hq import TemporalFocalTransformerBlock, SoftSplit, SoftComp,\
-    SoftSplit_FlowGuide, TokenSlimmingModule, ReverseTSM
+    SoftSplit_FlowGuide, TokenSlimmingModule, ReverseTSM, ReverseTSM_v2
 from model.modules.spectral_norm import spectral_norm as _spectral_norm
 
 
@@ -136,7 +136,7 @@ class deconv(nn.Module):
 
 class InpaintGenerator(BaseNetwork):
     def __init__(self, init_weights=True, flow_align=True, skip_dcn=False, flow_guide=False, token_fusion=False,
-                 token_fusion_simple=False):
+                 token_fusion_simple=False, fusion_skip_connect=False):
         super(InpaintGenerator, self).__init__()
         # channel = 256   # default
         # hidden = 512    # default
@@ -149,9 +149,14 @@ class InpaintGenerator(BaseNetwork):
         # depths = 4   # 0.09s/frame
         depths = 2   # 0.08s/frame, 0.07s/frame with hidden = 128,
 
+        # 光流引导特征嵌入
         self.flow_guide = flow_guide
+        # token空间缩减
         self.token_fusion = token_fusion
+        # 共用token空间缩减和扩展模块
         self.token_fusion_simple = token_fusion_simple
+        # 在token空间扩展时使用缩减前的特征进行跳跃连接
+        self.fusion_skip_connect = fusion_skip_connect
 
         # encoder
         # self.encoder = Encoder()    # default
@@ -257,10 +262,19 @@ class InpaintGenerator(BaseNetwork):
                 self.slim_index.append(1)
 
                 dropped_token = max(0, num_patches - self.layer_patches[1])
-                if dropped_token > 0:
-                    self.rtsm.append(ReverseTSM(hidden, self.layer_patches[1], num_patches))
+
+                if not self.fusion_skip_connect:
+                    # 仅使用缩减后的token进行恢复
+                    if dropped_token > 0:
+                        self.rtsm.append(ReverseTSM(hidden, self.layer_patches[1], num_patches))
+                    else:
+                        self.rtsm.append(nn.Identity())
                 else:
-                    self.rtsm.append(nn.Identity())
+                    # 融合缩减前的 trans feat 进行 token 恢复
+                    if dropped_token > 0:
+                        self.rtsm.append(ReverseTSM_v2(hidden, self.layer_patches[1], num_patches))
+                    else:
+                        self.rtsm.append(nn.Identity())
 
         if not self.token_fusion:
             # default temporal focal transformer
@@ -379,8 +393,12 @@ class InpaintGenerator(BaseNetwork):
                 tokens = tsm(tokens)
                 # trans block
                 tokens, fold_output_size = self.transformer([tokens, fold_output_size])   # temporal focal trans block
-                # token 恢复
-                tokens = self.rtsm[0](tokens)
+                if not self.fusion_skip_connect:
+                    # token 恢复
+                    tokens = self.rtsm[0](tokens)
+                else:
+                    # 融合缩减前的 trans feat 进行 token 恢复
+                    tokens = self.rtsm[0](tokens, trans_feat)
 
             trans_feat = tokens
             trans_feat = self.sc(trans_feat, t, fold_output_size)

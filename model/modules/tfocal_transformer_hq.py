@@ -146,6 +146,44 @@ class ReverseTSM(nn.Module):
         return x
 
 
+class ReverseTSM_v2(nn.Module):
+    r"""Reverse Token Slim Module inspired by SiT.
+        Revised by Hao:
+        Add token fusion for video inpainting support.
+        Change MLP structure.
+        Add trans feat skip connection and mlp0 support."""
+    def __init__(self, dim, keeped_patches, recovered_patches, ratio=4.):
+        super().__init__()
+        self.norm0 = nn.LayerNorm(dim)
+        self.mlp0 = Mlp(keeped_patches + recovered_patches,
+                        hidden_features=int((keeped_patches + recovered_patches)*ratio),
+                        out_features=recovered_patches)
+        self.norm1 = nn.LayerNorm(dim)
+        self.mlp1 = Mlp(recovered_patches,
+                        hidden_features=int(recovered_patches*ratio),
+                        out_features=recovered_patches)
+        self.norm2 = nn.LayerNorm(dim)
+        self.mlp2 = Mlp(dim,
+                        hidden_features=int(dim*ratio),
+                        out_features=dim)
+    def forward(self, x, trans_feat):
+        b, t, num_h, num_w, hidden = x.shape
+        x = x.view(b*t, -1, hidden)     # B*T, Num_Token_Red, C
+        trans_feat = trans_feat.view(b * t, -1, hidden)  # B*T, Num_Token_Ori, C
+        x = torch.cat((x, trans_feat), dim=1)   # B*T, Num_Token_Ori + Num_Token_Red, C
+
+        x = self.norm0(x)
+        x = self.mlp0(x.transpose(2, 1))
+        x = x.transpose(2, 1)
+        x = self.norm1(x)
+        x = self.mlp1(x.transpose(2, 1))
+        x = x.transpose(2, 1)
+        x = x + self.mlp2(self.norm2(x))
+
+        x = x.view(b, t, int(num_h * 4 // 3), int(num_w * 4 // 3), hidden)  # 两个方向上各自缩减25%的token
+        return x
+
+
 class Mlp(nn.Module):
     '''
     MLP with support to use group linear operator
