@@ -135,8 +135,8 @@ class deconv(nn.Module):
 
 
 class InpaintGenerator(BaseNetwork):
-    def __init__(self, init_weights=True, flow_align=True, skip_dcn=False, flow_guide=False, token_fusion=False,
-                 token_fusion_simple=False, fusion_skip_connect=False):
+    def __init__(self, init_weights=True, flow_align=True, skip_dcn=False, flow_guide=False, token_fusion=True,
+                 token_fusion_simple=False, fusion_skip_connect=True):
         super(InpaintGenerator, self).__init__()
         # channel = 256   # default
         # hidden = 512    # default
@@ -250,17 +250,26 @@ class InpaintGenerator(BaseNetwork):
                     self.slim_index.append(i)
 
                 dropped_token = 0
-                for i in range(depths):
-                    dropped_token = max(dropped_token, num_patches - self.layer_patches[i + 1])
-                    if dropped_token > 0:
-                        self.rtsm.append(ReverseTSM(hidden, self.layer_patches[i + 1], num_patches))
-                    else:
-                        self.rtsm.append(nn.Identity())
+                if not self.fusion_skip_connect:
+                    # 仅使用缩减后的token进行恢复
+                    for i in range(depths):
+                        dropped_token = max(dropped_token, num_patches - self.layer_patches[i + 1])
+                        if dropped_token > 0:
+                            self.rtsm.append(ReverseTSM(hidden, self.layer_patches[i + 1], num_patches))
+                        else:
+                            self.rtsm.append(nn.Identity())
+                else:
+                    # 融合缩减前的 trans feat 进行 token 恢复
+                    for i in range(depths):
+                        dropped_token = max(dropped_token, num_patches - self.layer_patches[i + 1])
+                        if dropped_token > 0:
+                            self.rtsm.append(ReverseTSM_v2(hidden, self.layer_patches[i + 1], num_patches))
+                        else:
+                            self.rtsm.append(nn.Identity())
             else:
                 # 所有的trans block共用一个token缩减和一个token复原
                 self.tsm.append(TokenSlimmingModule(hidden, self.keeped_patches[1]))
                 self.slim_index.append(1)
-
                 dropped_token = max(0, num_patches - self.layer_patches[1])
 
                 if not self.fusion_skip_connect:
@@ -380,12 +389,19 @@ class InpaintGenerator(BaseNetwork):
                     # tokens, fold_output_size = blk([tokens, fold_output_size])
                     if (i + 1) in self.slim_index:
                         tsm = self.tsm[self.slim_index.index(i + 1)]
+                        if self.fusion_skip_connect:
+                            # 存储聚合前的tokens, 用于渐进式地跳连融合
+                            tokens_prior = tokens
                         # token 聚合
                         tokens = tsm(tokens)
                         # trans block
                         tokens, fold_output_size = blk([tokens, fold_output_size])
-                        # token 恢复
-                        tokens = self.rtsm[i](tokens)
+                        if not self.fusion_skip_connect:
+                            # token 恢复
+                            tokens = self.rtsm[i](tokens)
+                        else:
+                            # 融合缩减前的 tokens_prior 进行 token 恢复
+                            tokens = self.rtsm[i](tokens, tokens_prior)
             else:
                 # 所有的trans block共用一个token缩减和一个token复原
                 tsm = self.tsm[self.slim_index.index(1)]
