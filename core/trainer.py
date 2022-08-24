@@ -470,8 +470,9 @@ class Trainer:
         # debug
         # video_index_list = []
         # start_index_list = []
+        # video_name_list = []
         # ii = 0
-        # torch.autograd.set_detect_anomaly(True)
+        # # torch.autograd.set_detect_anomaly(True)
 
         for frames, masks, video_name, index, start_index in self.train_loader:
             self.iteration += 1
@@ -486,13 +487,17 @@ class Trainer:
             # debug
             # video_index_list.append(index)
             # start_index_list.append(start_index)
+            # video_name_list.append(video_name)
             # ii += 1
-            # print('-' * 50)
-            # print('[Bacth 0] Video Index: %d, Start Frame Index: %d || [Bacth 1] Video Index: %d, Start Frame Index: %d || iter: %d'
-            #       % (index[0], start_index[0], index[1], start_index[1], ii))
-            # print('[Bacth 2] Video Index: %d, Start Frame Index: %d || [Bacth 3] Video Index: %d, Start Frame Index: %d || iter: %d'
-            #       % (index[2], start_index[2], index[3], start_index[3], ii))
-            # print('-'*50)
+            # try:
+            #     print('-' * 50)
+            #     print('[Bacth 0] Video Index: %d, Start Frame Index: %d || [Bacth 1] Video Index: %d, Start Frame Index: %d || iter: %d'
+            #           % (index[0], start_index[0], index[1], start_index[1], ii))
+            #     # print('[Bacth 2] Video Index: %d, Start Frame Index: %d || [Bacth 3] Video Index: %d, Start Frame Index: %d || iter: %d'
+            #     #       % (index[2], start_index[2], index[3], start_index[3], ii))
+            #     print('-'*50)
+            # except:
+            #     pass
             # if ii > 10000:
             #     break
 

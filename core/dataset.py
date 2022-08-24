@@ -131,7 +131,9 @@ class TrainDataset_Mem(torch.utils.data.Dataset):
             self.worker_group_list.append(0)
 
     def __len__(self):
-        return len(self.video_names)
+        # return len(self.video_names)
+        # 视频切换等操作自定义完成，iter定义为一个大数避免与自定义index冲突
+        return len(self.video_names)*1000
 
     # 两次迭代相距5*bs帧, 不同batch通道是同一个视频
     # def __getitem__(self, index):
@@ -342,7 +344,8 @@ class TrainDataset_Mem(torch.utils.data.Dataset):
         # 根据index和start index读取帧
         self.index = self.video_index_list[self.batch_buffer]
         self.start_index = self.start_index_list[self.batch_buffer]
-        item = self.load_item_v3(index=self.index)
+        # item = self.load_item_v3(index=self.index)
+        item = self.load_item_v4()
 
         # 更新woker group的index
         self.worker_group_list[self.batch_buffer] += 1
@@ -480,6 +483,38 @@ class TrainDataset_Mem(torch.utils.data.Dataset):
         mask_tensors = self._to_tensors(masks)
 
         return frame_tensors, mask_tensors, video_name, index, self.start_index
+
+    def load_item_v4(self):
+        """避免dataloader的index和worker的index冲突"""
+        video_name = self.video_names[self.index]
+        # create masks
+        all_masks = create_random_shape_with_random_motion(
+            self.video_dict[video_name], imageHeight=self.h, imageWidth=self.w)
+
+        # create sample index
+        selected_index = self._sample_index_seq(self.video_dict[video_name],
+                                                self.num_local_frames,
+                                                self.num_ref_frames,
+                                                pivot=self.start_index)
+
+        # read video frames
+        frames = []
+        masks = []
+        for idx in selected_index:
+            video_path = os.path.join(self.args['data_root'],
+                                      self.args['name'], 'JPEGImages',
+                                      f'{video_name}.zip')
+            img = TrainZipReader.imread(video_path, idx).convert('RGB')
+            img = img.resize(self.size)
+            frames.append(img)
+            masks.append(all_masks[idx])
+
+        # normalizate, to tensors
+        frames = GroupRandomHorizontalFlip()(frames)
+        frame_tensors = self._to_tensors(frames) * 2.0 - 1.0
+        mask_tensors = self._to_tensors(masks)
+
+        return frame_tensors, mask_tensors, video_name, self.index, self.start_index
 
 
 class TestDataset(torch.utils.data.Dataset):
