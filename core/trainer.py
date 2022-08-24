@@ -13,7 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from core.lr_scheduler import MultiStepRestartLR, CosineAnnealingRestartLR
 from core.loss import AdversarialLoss
-from core.dataset import TrainDataset
+from core.dataset import TrainDataset, TrainDataset_Mem
 from model.modules.flow_comp import FlowCompletionLoss
 
 
@@ -27,7 +27,13 @@ class Trainer:
         self.spynet_lr = config['trainer'].get('spynet_lr', 1.0)
 
         # setup data set and data loader
-        self.train_dataset = TrainDataset(config['train_data_loader'])
+        if config['train_data_loader']['sequence_load'] == 0:
+            # 默认的训练loader，非序列化输入训练
+            self.train_dataset = TrainDataset(config['train_data_loader'])
+        else:
+            # 记忆训练的序列化训练loader
+            self.train_dataset = TrainDataset_Mem(config['train_data_loader'],
+                                                  batch_size=config['trainer']['batch_size'])
 
         self.train_sampler = None
         self.train_args = config['trainer']
@@ -37,12 +43,21 @@ class Trainer:
                 num_replicas=config['world_size'],
                 rank=config['global_rank'])
 
-        self.train_loader = DataLoader(
-            self.train_dataset,
-            batch_size=self.train_args['batch_size'] // config['world_size'],
-            shuffle=(self.train_sampler is None),
-            num_workers=self.train_args['num_workers'],
-            sampler=self.train_sampler)
+        if config['train_data_loader']['sequence_load'] == 0:
+            # 默认的训练loader，非序列化shuffle输入训练
+            self.train_loader = DataLoader(
+                self.train_dataset,
+                batch_size=self.train_args['batch_size'] // config['world_size'],
+                shuffle=(self.train_sampler is None),
+                num_workers=self.train_args['num_workers'],
+                sampler=self.train_sampler)
+        else:
+            # 记忆训练的序列化训练loader
+            self.train_loader = DataLoader(
+                self.train_dataset,
+                batch_size=self.train_args['batch_size'] // config['world_size'],
+                num_workers=self.train_args['num_workers'],
+                sampler=self.train_sampler)
 
         # set loss functions
         self.adversarial_loss = AdversarialLoss(
@@ -84,9 +99,15 @@ class Trainer:
             else:
                 self.fusion_skip_connect = False
 
+            if config['model']['memory'] != 0:
+                self.memory = True
+            else:
+                self.memory = False
+
             self.netG = net.InpaintGenerator(
                 skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,
-                token_fusion_simple=self.token_fusion_simple, fusion_skip_connect=self.fusion_skip_connect)
+                token_fusion_simple=self.token_fusion_simple, fusion_skip_connect=self.fusion_skip_connect,
+                memory=self.memory)
         else:
             self.netG = net.InpaintGenerator()
         print(self.netG)
@@ -321,7 +342,12 @@ class Trainer:
             if self.config['distributed']:
                 self.train_sampler.set_epoch(self.epoch)
 
-            self._train_epoch(pbar)
+            if not self.memory:
+                self._train_epoch(pbar)
+            else:
+                # 序列视频输入用于记忆力训练
+                self._train_epoch_mem(pbar)
+
             if self.iteration > self.train_args['iterations']:
                 break
         print('\nEnd training....')
@@ -393,6 +419,135 @@ class Trainer:
             # 非遮挡区域的loss
             valid_loss = valid_loss / torch.mean(1-masks) \
                 * self.config['losses']['valid_weight']
+            gen_loss += valid_loss
+            self.add_summary(self.gen_writer, 'loss/valid_loss',
+                             valid_loss.item())
+
+            self.optimG.zero_grad()
+            # gen loss 是对抗、光流、空洞和非遮挡区域loss之和
+            gen_loss.backward()
+            self.optimG.step()
+
+            self.update_learning_rate()
+
+            # console logs
+            if self.config['global_rank'] == 0:
+                pbar.update(1)
+                if not self.config['model']['no_dis']:
+                    pbar.set_description((f"flow: {flow_loss.item():.3f}; "
+                                          f"d: {dis_loss.item():.3f}; "
+                                          f"hole: {hole_loss.item():.3f}; "
+                                          f"valid: {valid_loss.item():.3f}"))
+                else:
+                    pbar.set_description((f"flow: {flow_loss.item():.3f}; "
+                                          f"hole: {hole_loss.item():.3f}; "
+                                          f"valid: {valid_loss.item():.3f}"))
+
+                if self.iteration % self.train_args['log_freq'] == 0:
+                    if not self.config['model']['no_dis']:
+                        logging.info(f"[Iter {self.iteration}] "
+                                     f"flow: {flow_loss.item():.4f}; "
+                                     f"d: {dis_loss.item():.4f}; "
+                                     f"hole: {hole_loss.item():.4f}; "
+                                     f"valid: {valid_loss.item():.4f}")
+                    else:
+                        logging.info(f"[Iter {self.iteration}] "
+                                     f"flow: {flow_loss.item():.4f}; "
+                                     f"hole: {hole_loss.item():.4f}; "
+                                     f"valid: {valid_loss.item():.4f}")
+
+            # saving models
+            if self.iteration % self.train_args['save_freq'] == 0:
+                self.save(int(self.iteration))
+
+            if self.iteration > self.train_args['iterations']:
+                break
+
+    def _train_epoch_mem(self, pbar):
+        """Process input and calculate loss every training epoch in a sequence manner with memory"""
+        device = self.config['device']
+
+        # debug
+        # video_index_list = []
+        # start_index_list = []
+        # ii = 0
+
+        for frames, masks, video_name, index, start_index in self.train_loader:
+            self.iteration += 1
+
+            # debug
+            # video_index_list.append(index)
+            # start_index_list.append(start_index)
+            # ii += 1
+            # print('-' * 50)
+            # print('[Bacth 0] Video Index: %d, Start Frame Index: %d || [Bacth 1] Video Index: %d, Start Frame Index: %d || iter: %d'
+            #       % (index[0], start_index[0], index[1], start_index[1], ii))
+            # print('[Bacth 2] Video Index: %d, Start Frame Index: %d || [Bacth 3] Video Index: %d, Start Frame Index: %d || iter: %d'
+            #       % (index[2], start_index[2], index[3], start_index[3], ii))
+            # print('-'*50)
+            # if ii > 10000:
+            #     break
+
+            frames, masks = frames.to(device), masks.to(device)
+            l_t = self.num_local_frames
+            b, t, c, h, w = frames.size()
+
+            masked_frames = (frames * (1 - masks).float())
+            gt_local_frames = (frames[:, :l_t, ...] + 1) / 2
+
+            pred_imgs, pred_flows = self.netG(masked_frames, l_t)
+            pred_imgs = pred_imgs.view(b, -1, c, h, w)
+            comp_imgs = frames * (1. - masks) + masks * pred_imgs
+
+            # compute flow completion loss
+            flow_loss = self.flow_comp_loss(pred_flows, gt_local_frames)
+
+            gen_loss = 0
+            dis_loss = 0
+
+            if not self.config['model']['no_dis']:
+                # discriminator adversarial loss
+                real_clip = self.netD(frames)
+                fake_clip = self.netD(comp_imgs.detach())
+                dis_real_loss = self.adversarial_loss(real_clip, True, True)
+                dis_fake_loss = self.adversarial_loss(fake_clip, False, True)
+                dis_loss += (dis_real_loss + dis_fake_loss) / 2
+                self.add_summary(self.dis_writer, 'loss/dis_vid_fake',
+                                 dis_fake_loss.item())
+                self.add_summary(self.dis_writer, 'loss/dis_vid_real',
+                                 dis_real_loss.item())
+                self.optimD.zero_grad()
+                dis_loss.backward()
+                self.optimD.step()
+
+                # generator adversarial loss
+                gen_clip = self.netD(comp_imgs)
+                gan_loss = self.adversarial_loss(gen_clip, True, False)
+                gan_loss = gan_loss \
+                           * self.config['losses']['adversarial_weight']
+                gen_loss += gan_loss
+                self.add_summary(self.gen_writer, 'loss/gan_loss',
+                                 gan_loss.item())
+
+            flow_loss = flow_loss * self.config['losses']['flow_weight']
+            gen_loss += flow_loss
+            self.add_summary(self.gen_writer, 'loss/flow_loss',
+                             flow_loss.item())
+
+            # generator l1 loss
+            hole_loss = self.l1_loss(pred_imgs * masks, frames * masks)
+            # 空洞内的loss
+            hole_loss = hole_loss / torch.mean(masks) \
+                        * self.config['losses']['hole_weight']
+            gen_loss += hole_loss
+            self.add_summary(self.gen_writer, 'loss/hole_loss',
+                             hole_loss.item())
+
+            valid_loss = self.l1_loss(pred_imgs * (1 - masks),
+                                      frames * (1 - masks))
+            # 非遮挡区域的loss
+            valid_loss = valid_loss / torch.mean(1 - masks) \
+                         * self.config['losses']['valid_weight']
             gen_loss += valid_loss
             self.add_summary(self.gen_writer, 'loss/valid_loss',
                              valid_loss.item())
