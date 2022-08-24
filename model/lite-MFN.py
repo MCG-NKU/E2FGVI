@@ -136,7 +136,7 @@ class deconv(nn.Module):
 
 class InpaintGenerator(BaseNetwork):
     def __init__(self, init_weights=True, flow_align=True, skip_dcn=False, flow_guide=False, token_fusion=True,
-                 token_fusion_simple=False, fusion_skip_connect=False, memory=True):
+                 token_fusion_simple=False, fusion_skip_connect=False, memory=False):
         super(InpaintGenerator, self).__init__()
         # channel = 256   # default
         # hidden = 512    # default
@@ -159,6 +159,11 @@ class InpaintGenerator(BaseNetwork):
         self.fusion_skip_connect = fusion_skip_connect
         # 引入Memory机制存储上次的补全feat
         self.memory = memory
+
+        # if self.memory:
+        max_mem_len = 4     # 记忆的最长存储时间，以forward次数为单位
+        compression_factor = 4     # 记忆张量的压缩系数，通道以及空间共用
+        mem_pool = False    # 是否使用池化来进一步在空间上压缩记忆张量
 
         # encoder
         # self.encoder = Encoder()    # default
@@ -298,7 +303,11 @@ class InpaintGenerator(BaseNetwork):
                                                   focal_window=focal_windows[i],
                                                   n_vecs=n_vecs,
                                                   t2t_params=t2t_params,
-                                                  pool_method=pool_method))
+                                                  pool_method=pool_method,
+                                                  memory=self.memory,
+                                                  max_mem_len=max_mem_len,
+                                                  compression_factor=compression_factor,
+                                                  mem_pool=mem_pool),)
             self.transformer = nn.Sequential(*blocks)
         else:
             # 根据token聚合指数修改temporal focal transformer

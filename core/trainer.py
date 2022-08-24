@@ -471,9 +471,17 @@ class Trainer:
         # video_index_list = []
         # start_index_list = []
         # ii = 0
+        # torch.autograd.set_detect_anomaly(True)
 
         for frames, masks, video_name, index, start_index in self.train_loader:
             self.iteration += 1
+
+            # 当有新视频出现时，即start_index为0时，清空记忆缓存
+            for start_idx in start_index:
+                if start_idx == 0:
+                    for blk in self.netG.transformer:
+                        blk.attn.m_k = []
+                        blk.attn.m_v = []
 
             # debug
             # video_index_list.append(index)

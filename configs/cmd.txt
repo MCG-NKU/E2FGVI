@@ -147,3 +147,6 @@ python train.py -c configs/ablation_lite-MFN-token-fusion-simple.json
 CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --ckpt release_model/lite-MFN_ablation_lite-MFN-token-fusion-simple/gen_250000.pth --good_fusion --timing
 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.48/0.9372/0.255     # PSNR降低0.13
 All average forward run time: (0.071416) per frame  [本地3090]
+
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长4，通道缩减4 [本地3090] 约需要48h
+python train.py -c configs/ablation_lite-MFN-mem.json
