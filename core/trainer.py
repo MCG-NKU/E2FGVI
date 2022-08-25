@@ -72,6 +72,12 @@ class Trainer:
 
         # setup models including generator and discriminator
         net = importlib.import_module('model.' + config['model']['net'])
+
+        if config['model']['memory'] != 0:
+            self.memory = True
+        else:
+            self.memory = False
+
         if config['model']['net'] == 'lite-MFN':
 
             if config['model']['skip_dcn'] != 0:
@@ -99,10 +105,10 @@ class Trainer:
             else:
                 self.fusion_skip_connect = False
 
-            if config['model']['memory'] != 0:
-                self.memory = True
-            else:
-                self.memory = False
+            # if config['model']['memory'] != 0:
+            #     self.memory = True
+            # else:
+            #     self.memory = False
 
             self.netG = net.InpaintGenerator(
                 skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,

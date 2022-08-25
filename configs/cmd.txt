@@ -150,3 +150,28 @@ All average forward run time: (0.071416) per frame  [本地3090]
 
 # 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长4，通道缩减4 [本地3090] 约需要48h
 python train.py -c configs/ablation_lite-MFN-mem.json
+
+# 测试不同记忆力设置下的显存消耗以及速度
+----
+E2FGVI_HQ bs2 显存消耗：20.43GB
+----
+lite-MFN 原E2FGVI大小 bs2 显存消耗：20.97GB
+----
+lite-MFN 原E2FGVI大小 bs2 token fusion 不共用 75%x75% 显存消耗：20.52GB
+lite-MFN 原E2FGVI大小 bs2 token fusion 不共用 跳跃链接 75%x75% 显存消耗：23.47GB
+lite-MFN 原E2FGVI大小 bs2 token fusion 共用 75%x75% 显存消耗: 21.01GB
+lite-MFN 原E2FGVI大小 bs2 token fusion 共用 跳跃链接 75%x75% 显存消耗: 21.01GB
+----
+lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减4 记忆时长4 显存消耗: 22.96GB 22.96GB
+lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减4 记忆时长8 显存消耗: 23.42GB 23.43GB
+lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减4 记忆时长16 显存消耗: 22.89GB 22.89GB
+lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减4 记忆时长32 显存消耗: 23.50GB 23.34GB
+----
+lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减8 记忆时长4 显存消耗: 22.86GB 22.86GB
+lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减8 记忆时长8 显存消耗: 22.95GB 22.95GB
+lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减8 记忆时长16 显存消耗: 23.01GB 22.26GB
+lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减8 记忆时长32 显存消耗: 22.95GB 22.90GB
+----
+
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4 [本地3090Ti] 约需要h
+python train.py -c configs/ablation_lite-MFN-mem-T8C4.json

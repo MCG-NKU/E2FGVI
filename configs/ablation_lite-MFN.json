@@ -2,6 +2,7 @@
     "seed": 2021,
     "save_dir": "release_model/",
     "train_data_loader": {
+        "sequence_load": 0,
         "name": "youtube-vos",
         "data_root": "datasets",
         "w": 432,
@@ -18,7 +19,13 @@
     },
     "model": {
         "net": "lite-MFN",
-        "no_dis": 0
+        "no_dis": 0,
+        "skip_dcn": 0,
+        "flow_guide": 0,
+        "token_fusion": 0,
+        "token_fusion_simple": 0,
+        "fusion_skip_connect": 0,
+        "memory": 0
     },
     "trainer": {
         "type": "Adam",
