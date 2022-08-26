@@ -148,6 +148,18 @@ CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --dataset davis --dat
 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.48/0.9372/0.255     # PSNR降低0.13
 All average forward run time: (0.071416) per frame  [本地3090]
 
+# 训练token缩减0.75*0.75的lite-MFN 共用1个token缩减和拓展模块，加一个token的跳跃链接和fusion层 [已完成] 需要60.5h
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-token-fusion-simple-skip-connect.json
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --ckpt release_model/lite-MFN_ablation_lite-MFN-token-fusion-simple-skip-connect/gen_250000.pth --good_fusion --timing
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.55/0.9396/0.247     # PSNR降低0.06
+All average forward run time: (0.055883) per frame [矩池云3090]
+
+# 训练token缩减0.75*0.75的lite-MFN 独立token缩减和拓展模块，渐进式token的跳跃链接和fusion层 [已完成] 约需要60h
+CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_lite-MFN-token-fusion-skip-connect.json
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --ckpt release_model/lite-MFN_ablation_lite-MFN-token-fusion-skip-connect/gen_250000.pth --good_fusion --timing
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.14/0.9366/0.251     # PSNR降低0.47
+All average forward run time: (0.054300) per frame
+
 # 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长4，通道缩减4 [本地3090] 约需要48h
 python train.py -c configs/ablation_lite-MFN-mem.json
 
@@ -175,3 +187,9 @@ lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减8 记忆时长32 显存消耗
 
 # 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4 [本地3090Ti] 约需要h
 python train.py -c configs/ablation_lite-MFN-mem-T8C4.json
+
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长4，通道缩减8 [tmux 0] 约需要h
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T4C8.json
+
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减8 [tmux 1] 约需要h
+CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_lite-MFN-mem-T8C8.json

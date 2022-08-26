@@ -135,8 +135,9 @@ class deconv(nn.Module):
 
 
 class InpaintGenerator(BaseNetwork):
-    def __init__(self, init_weights=True, flow_align=True, skip_dcn=False, flow_guide=False, token_fusion=False,
-                 token_fusion_simple=False, fusion_skip_connect=False, memory=False):
+    def __init__(self, init_weights=True, flow_align=True, skip_dcn=False, flow_guide=False,
+                 token_fusion=False, token_fusion_simple=False, fusion_skip_connect=False,
+                 memory=False, max_mem_len=4, compression_factor=4, mem_pool=False):
         super(InpaintGenerator, self).__init__()
         # channel = 256   # default
         # hidden = 512    # default
@@ -160,9 +161,9 @@ class InpaintGenerator(BaseNetwork):
         self.memory = memory
 
         # if self.memory:
-        max_mem_len = 8            # 记忆的最长存储时间，以forward次数为单位
-        compression_factor = 4     # 记忆张量的压缩系数，通道以及空间共用
-        mem_pool = False           # 是否使用池化来进一步在空间上压缩记忆张量
+        max_mem_len = max_mem_len            # 记忆的最长存储时间，以forward次数为单位
+        compression_factor = compression_factor     # 记忆张量的压缩系数，通道以及空间共用
+        mem_pool = mem_pool           # 是否使用池化来进一步在空间上压缩记忆张量
 
         # encoder
         # self.encoder = Encoder()    # default
