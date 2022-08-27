@@ -173,5 +173,5 @@ lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减8 记忆时长16 显存消耗
 lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减8 记忆时长32 显存消耗: 22.95GB 22.90GB
 ----
 
-# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4 [本地3090Ti] 约需要h
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4 [本地3090Ti] 约需要46.5h
 python train.py -c configs/ablation_lite-MFN-mem-T8C4.json

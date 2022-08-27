@@ -32,6 +32,15 @@ def get_ref_index(neighbor_ids, length):
     return ref_index
 
 
+# sample reference frames from the whole video with mem support
+# 允许相同的局部帧和非局部帧id，保证时间维度的一致性，但是引入了冗余计算？
+def get_ref_index_mem(length):
+    ref_index = []
+    for i in range(0, length, ref_length):
+        ref_index.append(i)
+    return ref_index
+
+
 def main_worker(args):
     args.size = (w, h)
     # set up datasets and data loader
@@ -78,6 +87,12 @@ def main_worker(args):
 
     for index, items in enumerate(test_loader):
 
+        if args.memory:
+            # 进入新的视频时清空记忆缓存
+            for blk in model.transformer:
+                blk.attn.m_k = []
+                blk.attn.m_v = []
+
         frames, masks, video_name, frames_PIL = items
 
         video_length = frames.size(1)
@@ -92,14 +107,50 @@ def main_worker(args):
             len_all += video_length
 
         # complete holes by our model
+        # 当这个循环走完的时候，一段视频已经被补全了
         for f in range(0, video_length, neighbor_stride):
-            neighbor_ids = [
-                i for i in range(max(0, f - neighbor_stride),
-                                 min(video_length, f + neighbor_stride + 1))
-            ]   # neighbor_ids即为Local Frames, 局部帧
-            ref_ids = get_ref_index(neighbor_ids, video_length)     # ref_ids即为Non-Local Frames, 非局部帧
-            selected_imgs = frames[:1, neighbor_ids + ref_ids, :, :, :]
-            selected_masks = masks[:1, neighbor_ids + ref_ids, :, :, :]
+            if not args.memory:
+                # default id with different T
+                neighbor_ids = [
+                    i for i in range(max(0, f - neighbor_stride),
+                                     min(video_length, f + neighbor_stride + 1))
+                ]   # neighbor_ids即为Local Frames, 局部帧
+            else:
+                # 输入的时间维度T保持一致
+                if (f - neighbor_stride > 0) and (f + neighbor_stride + 1 < video_length):
+                    # 视频首尾均不会越界，不需要补充额外帧
+                    neighbor_ids = [
+                        i for i in range(max(0, f - neighbor_stride),
+                                         min(video_length, f + neighbor_stride + 1))
+                    ]   # neighbor_ids即为Local Frames, 局部帧
+                else:
+                    # 视频越界，补充额外帧保证记忆缓存的时间通道维度一致，后面也可以尝试放到trans里直接复制特征的时间维度
+                    neighbor_ids = [
+                        i for i in range(max(0, f - neighbor_stride),
+                                         min(video_length, f + neighbor_stride + 1))
+                    ]  # neighbor_ids即为Local Frames, 局部帧
+                    repeat_num = (neighbor_stride * 2 + 1) - len(neighbor_ids)
+                    for ii in range(0, repeat_num):
+                        # 复制最后一帧
+                        neighbor_ids.append(neighbor_ids[-1])
+
+            if not args.memory:
+                # default test set, 局部帧与非局部帧不会输入同样id的帧
+                ref_ids = get_ref_index(neighbor_ids, video_length)  # ref_ids即为Non-Local Frames, 非局部帧
+
+                selected_imgs = frames[:1, neighbor_ids + ref_ids, :, :, :]
+                selected_masks = masks[:1, neighbor_ids + ref_ids, :, :, :]
+            else:
+                # 为了保证时间维度一致, 允许输入相同id的帧
+                ref_ids = get_ref_index_mem(video_length)  # ref_ids即为Non-Local Frames, 非局部帧
+
+                selected_imgs_lf = frames[:1, neighbor_ids, :, :, :]
+                selected_imgs_nlf = frames[:1, ref_ids, :, :, :]
+                selected_imgs = torch.cat((selected_imgs_lf, selected_imgs_nlf), dim=1)
+                selected_masks_lf = masks[:1, neighbor_ids, :, :, :]
+                selected_masks_nlf = masks[:1, ref_ids, :, :, :]
+                selected_masks = torch.cat((selected_masks_lf, selected_masks_nlf), dim=1)
+
             with torch.no_grad():
                 masked_frames = selected_imgs * (1 - selected_masks)
 
@@ -230,6 +281,7 @@ if __name__ == '__main__':
     parser.add_argument('--timing', action='store_true', default=False)
     parser.add_argument('--profile', action='store_true', default=False)
     parser.add_argument('--good_fusion', action='store_true', default=False, help='using my fusion strategy')
+    parser.add_argument('--memory', action='store_true', default=False, help='test with memory ability')
     args = parser.parse_args()
 
     if args.profile:
