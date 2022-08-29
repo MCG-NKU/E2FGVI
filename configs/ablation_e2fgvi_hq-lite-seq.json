@@ -19,7 +19,8 @@
     },
     "model": {
         "net": "e2fgvi_hq-lite",
-        "no_dis": 0
+        "no_dis": 0,
+        "memory": 0
     },
     "trainer": {
         "type": "Adam",

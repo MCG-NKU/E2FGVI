@@ -160,7 +160,7 @@ CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --dataset davis --dat
 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.14/0.9366/0.251     # PSNR降低0.47
 All average forward run time: (0.054300) per frame
 
-# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长4，通道缩减4 [本地3090] 约需要48h
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长4，通道缩减4 [已完成] 约需要54h
 python train.py -c configs/ablation_lite-MFN-mem.json
 
 # 测试不同记忆力设置下的显存消耗以及速度
