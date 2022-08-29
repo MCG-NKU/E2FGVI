@@ -162,12 +162,14 @@ All average forward run time: (0.054300) per frame
 
 # 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长4，通道缩减4 [已完成] 约需要54h
 python train.py -c configs/ablation_lite-MFN-mem.json
+python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --ckpt release_model/lite-MFN_ablation_lite-MFN-mem/gen_250000.pth --good_fusion --timing --memory
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 27.96/0.9321/0.265     # PSNR降低0.65(对比无记忆力下降1.15)
 
 # 测试不同记忆力设置下的显存消耗以及速度
 ----
 E2FGVI_HQ bs2 显存消耗：20.43GB
 ----
-lite-MFN 原E2FGVI大小 bs2 显存消耗：20.97GB
+lite-MFN 原E2FGVI大小 bs2 显存消耗：19.26GB [3090]
 ----
 lite-MFN 原E2FGVI大小 bs2 token fusion 不共用 75%x75% 显存消耗：20.52GB
 lite-MFN 原E2FGVI大小 bs2 token fusion 不共用 跳跃链接 75%x75% 显存消耗：23.47GB
@@ -185,11 +187,21 @@ lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减8 记忆时长16 显存消耗
 lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减8 记忆时长32 显存消耗: 22.95GB 22.90GB
 ----
 
-# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4 [本地3090Ti] 约需要46.5h
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4 [已完成] 约需要46.5h
 python train.py -c configs/ablation_lite-MFN-mem-T8C4.json
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.71                   # PSNR提升0.10(对比无记忆力下降0.40)
 
-# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长4，通道缩减8 [tmux 0] 约需要h
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长4，通道缩减8 [已完成] 需要55h
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T4C8.json
+python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T4C8/gen_250000.pth --good_fusion --timing --memory
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 27.13/0.9285/0.277      # PSNR降低1.48(对比无记忆力下降1.98)
+All average forward run time: (0.060132) per frame [矩池云3090]
 
-# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减8 [tmux 1] 约需要h
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减8 [已完成] 需要54.5h
 CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_lite-MFN-mem-T8C8.json
+python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T8C8/gen_250000.pth --good_fusion --timing --memory
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.37/0.9359/0.247      # PSNR降低0.24(对比无记忆力下降0.74)
+All average forward run time: (0.058200) per frame  [矩池云3090]
+
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减2 [未开始] 约需要h
+python train.py -c configs/ablation_lite-MFN-mem-T8C2.json
