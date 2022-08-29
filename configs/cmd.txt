@@ -169,12 +169,17 @@ python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --ckpt
 ----
 E2FGVI_HQ bs2 显存消耗：20.43GB
 ----
-lite-MFN 原E2FGVI大小 bs2 显存消耗：19.26GB [3090]
+lite-MFN 原E2FGVI大小 bs2 显存消耗：20.97GB
 ----
 lite-MFN 原E2FGVI大小 bs2 token fusion 不共用 75%x75% 显存消耗：20.52GB
 lite-MFN 原E2FGVI大小 bs2 token fusion 不共用 跳跃链接 75%x75% 显存消耗：23.47GB
 lite-MFN 原E2FGVI大小 bs2 token fusion 共用 75%x75% 显存消耗: 21.01GB
 lite-MFN 原E2FGVI大小 bs2 token fusion 共用 跳跃链接 75%x75% 显存消耗: 21.01GB
+----
+lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减1 记忆时长4 显存消耗：可以运行 [3090]
+lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减1 记忆时长8 显存消耗：显存溢出 [3090]
+lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减1 记忆时长8 拆除dcn 显存消耗：显存溢出 [3090]
+lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减2 记忆时长8 显存消耗：19.26GB [3090]
 ----
 lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减4 记忆时长4 显存消耗: 22.96GB 22.96GB
 lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减4 记忆时长8 显存消耗: 23.42GB 23.43GB
@@ -203,5 +208,13 @@ python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --ckpt
 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.37/0.9359/0.247      # PSNR降低0.24(对比无记忆力下降0.74)
 All average forward run time: (0.058200) per frame  [矩池云3090]
 
-# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减2 [未开始] 约需要h
-python train.py -c configs/ablation_lite-MFN-mem-T8C2.json
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减2 [tmux1] 约需要h
+CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_lite-MFN-mem-T8C2.json
+
+# 训练e2fgvi-lite来对比序列化dataloader的训练不稳定导致的精度退化 [3090Ti]
+python train.py -c configs/ablation_e2fgvi_hq-lite-seq.json
+
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4，学习率降低4倍来稳定训练loss [tmux0] 约需要52.5h
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T8C4-lr0.25.json
+
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长4，通道缩减1 [未开始] 约需要h
