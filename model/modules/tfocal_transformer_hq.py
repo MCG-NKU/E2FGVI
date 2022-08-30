@@ -592,7 +592,8 @@ class WindowAttentionMem(nn.Module):
     """Temporal focal window attention with memory built in.
     """
     def __init__(self, dim, expand_size, window_size, focal_window,
-                 focal_level, num_heads, qkv_bias, pool_method, memory, max_mem_len, compression_factor, mem_pool):
+                 focal_level, num_heads, qkv_bias, pool_method,
+                 memory, max_mem_len, compression_factor, mem_pool, store_lf):
 
         super().__init__()
         self.dim = dim
@@ -607,6 +608,7 @@ class WindowAttentionMem(nn.Module):
 
         self.memory = memory
         self.mem_pool = mem_pool
+        self.store_lf = store_lf
 
         if any(i > 0 for i in self.expand_size) and focal_level > 0:
             # get mask for rolled k and rolled v
@@ -659,6 +661,7 @@ class WindowAttentionMem(nn.Module):
 
             if not self.mem_pool:
                 # memory机制的含参数运算层-[基于通道的压缩]
+                # 兼容局部非局部都存储和只存储局部帧的行为
                 self.f_k = nn.Linear(dim, dim // self.compression_factor, bias=True)  # 用于更新上一时刻的k并压缩之前的记忆张量
                 self.f_v = nn.Linear(dim, dim // self.compression_factor, bias=True)  # 用于更新上一时刻的v并压缩之前的记忆张量
                 self.lin_q = nn.Linear(dim, dim, bias=True)  # 用于把当前的q转换为适合查找记忆力的q
@@ -717,11 +720,12 @@ class WindowAttentionMem(nn.Module):
                                           math.floor(self.focal_window[1] * 4 / self.compression_factor),
                                           self.focal_window[0] * 4 * self.focal_window[1] * 4, bias=True)
 
-    def forward(self, x_all, mask_all=None):
+    def forward(self, x_all, mask_all=None, l_t=5):
         """
         Args:
-            x: input features with shape of (B, T, Wh, Ww, C)
-            mask: (0/-inf) mask with shape of (num_windows, T*Wh*Ww, T*Wh*Ww) or None
+            x_all: input features with shape of (B, T, Wh, Ww, C)
+            mask_all: (0/-inf) mask with shape of (num_windows, T*Wh*Ww, T*Wh*Ww) or None
+            l_t: local frame nums
 
             output: (nW*B, Wh*Ww, C)
         """
@@ -735,48 +739,95 @@ class WindowAttentionMem(nn.Module):
         # memory ability
         if self.memory:
 
-            # q_temp = q
-            # k_temp = k  # debug
-            # v_temp = v
-
             if not self.mem_pool:
                 # 通道压缩时序的记忆力
-                if len(self.m_k) != 0:
-                    cm_k = self.f_k(self.m_k[-1])
-                    cm_v = self.f_v(self.m_v[-1])
-                else:
-                    # 第一帧时没有记忆张量，使用当前帧的k，v
-                    cm_k = self.f_k(k)
-                    cm_v = self.f_v(v)
 
-                # 增强qkv
-                q = self.lin_q(q)
-                if len(self.m_k) == self.max_len:
-                    # 因为缓存里的最后一帧还没被压缩的替换，所以不取最后一帧
-                    k = self.lin_k(torch.cat((
-                        torch.cat(self.m_k[:-1], dim=4), cm_k, k), dim=4))
-                    v = self.lin_v(torch.cat((
-                        torch.cat(self.m_v[:-1], dim=4), cm_v, v), dim=4))
-                    # 后面的索引用到了k所以保存一下
-                    k_temp = k
-                else:
-                    repeat_k = self.max_len - len(self.m_k)
-                    repeat_v = self.max_len - len(self.m_v)
-                    # 尽量使用缓存中的帧，不够的使用当前帧提取的代替
-                    if len(self.m_k) == 0:
-                        k = self.lin_k(torch.cat((cm_k.repeat(1, 1, 1, 1, repeat_k), k), dim=4))
-                        v = self.lin_v(torch.cat((cm_v.repeat(1, 1, 1, 1, repeat_v), v), dim=4))
-                        k_temp = k  # debug
+                if not self.store_lf:
+                    # 局部和随机的非局部帧都会被存储
+                    # 压缩上一个记忆缓存
+                    if len(self.m_k) != 0:
+                        cm_k = self.f_k(self.m_k[-1])
+                        cm_v = self.f_v(self.m_v[-1])
                     else:
-                        k_rep_feat = self.f_k(k)
-                        k_rep_feat = k_rep_feat.repeat(1, 1, 1, 1, repeat_k)
-                        v_rep_feat = self.f_v(v)
-                        v_rep_feat = v_rep_feat.repeat(1, 1, 1, 1, repeat_v)
+                        # 第一帧时没有记忆张量，使用当前帧的k，v
+                        cm_k = self.f_k(k)
+                        cm_v = self.f_v(v)
+
+                    # 增强qkv
+                    q = self.lin_q(q)
+                    if len(self.m_k) == self.max_len:
+                        # 因为缓存里的最后一帧还没被压缩的替换，所以不取最后一帧
                         k = self.lin_k(torch.cat((
-                            torch.cat(self.m_k[:-1], dim=4), cm_k, k_rep_feat, k), dim=4))
+                            torch.cat(self.m_k[:-1], dim=4), cm_k, k), dim=4))
                         v = self.lin_v(torch.cat((
-                            torch.cat(self.m_v[:-1], dim=4), cm_v, v_rep_feat, v), dim=4))
-                        k_temp = k  # debug
+                            torch.cat(self.m_v[:-1], dim=4), cm_v, v), dim=4))
+                        # 后面的索引用到了k所以保存一下
+                        k_temp = k
+                    else:
+                        repeat_k = self.max_len - len(self.m_k)
+                        repeat_v = self.max_len - len(self.m_v)
+                        # 尽量使用缓存中的帧，不够的使用当前帧提取的代替
+                        if len(self.m_k) == 0:
+                            k = self.lin_k(torch.cat((cm_k.repeat(1, 1, 1, 1, repeat_k), k), dim=4))
+                            v = self.lin_v(torch.cat((cm_v.repeat(1, 1, 1, 1, repeat_v), v), dim=4))
+                            k_temp = k  # debug
+                        else:
+                            k_rep_feat = self.f_k(k)
+                            k_rep_feat = k_rep_feat.repeat(1, 1, 1, 1, repeat_k)
+                            v_rep_feat = self.f_v(v)
+                            v_rep_feat = v_rep_feat.repeat(1, 1, 1, 1, repeat_v)
+                            k = self.lin_k(torch.cat((
+                                torch.cat(self.m_k[:-1], dim=4), cm_k, k_rep_feat, k), dim=4))
+                            v = self.lin_v(torch.cat((
+                                torch.cat(self.m_v[:-1], dim=4), cm_v, v_rep_feat, v), dim=4))
+                            k_temp = k  # debug
+                else:
+                    # 仅存储局部帧的记忆
+                    q_lf = q[:, :l_t, ...]
+                    k_lf = k[:, :l_t, ...]
+                    v_lf = v[:, :l_t, ...]
+
+                    # 压缩上一个记忆缓存
+                    if len(self.m_k) != 0:
+                        cm_k = self.f_k(self.m_k[-1])
+                        cm_v = self.f_v(self.m_v[-1])
+                    else:
+                        # 第一帧时没有记忆张量，使用当前的局部帧k，v
+                        cm_k = self.f_k(k_lf)
+                        cm_v = self.f_v(v_lf)
+
+                    # 增强局部帧的qkv
+                    q_lf = self.lin_q(q_lf)
+                    if len(self.m_k) == self.max_len:
+                        # 缓存满了的情况，不需要补充临时的记忆张量
+                        # 因为缓存里的最后一帧还没被压缩的替换，所以不取最后一帧的缓存，直接拿压缩完的cm就可
+                        k_lf = self.lin_k(torch.cat((
+                            torch.cat(self.m_k[:-1], dim=4), cm_k, k_lf), dim=4))
+                        v_lf = self.lin_v(torch.cat((
+                            torch.cat(self.m_v[:-1], dim=4), cm_v, v_lf), dim=4))
+                    else:
+                        # 缓存还没有存满，需要负责当前帧的张量
+                        repeat_k = self.max_len - len(self.m_k)
+                        repeat_v = self.max_len - len(self.m_v)
+                        if len(self.m_k) == 0:
+                            # 缓存里啥也没有，直接把当前的全复制了
+                            k_lf = self.lin_k(torch.cat((cm_k.repeat(1, 1, 1, 1, repeat_k), k_lf), dim=4))
+                            v_lf = self.lin_v(torch.cat((cm_v.repeat(1, 1, 1, 1, repeat_v), v_lf), dim=4))
+                        else:
+                            # 尽量使用缓存中的帧，不够的使用当前帧提取的代替
+                            k_rep_feat = self.f_k(k_lf)
+                            k_rep_feat = k_rep_feat.repeat(1, 1, 1, 1, repeat_k)
+                            v_rep_feat = self.f_v(v_lf)
+                            v_rep_feat = v_rep_feat.repeat(1, 1, 1, 1, repeat_v)
+                            k_lf = self.lin_k(torch.cat((
+                                torch.cat(self.m_k[:-1], dim=4), cm_k, k_rep_feat, k_lf), dim=4))
+                            v_lf = self.lin_v(torch.cat((
+                                torch.cat(self.m_v[:-1], dim=4), cm_v, v_rep_feat, v_lf), dim=4))
+
+                    # 把增强后的局部帧qkv还原到所有的qkv中
+                    q[:, :l_t, ...] = q_lf
+                    k[:, :l_t, ...] = k_lf
+                    v[:, :l_t, ...] = v_lf
 
             else:
                 # 空间压缩当前的q k v
@@ -995,9 +1046,15 @@ class WindowAttentionMem(nn.Module):
                 self.m_k.append(cm_k.detach())
                 self.m_v.append(cm_v.detach())
 
-            # 缓存当前时刻还没被压缩过的记忆张量
-            self.m_k.append(k_temp.detach())    # debug
-            self.m_v.append(v.detach())
+            # 缓存当前时刻还没被压缩过的记忆张量，会在下一个时刻被压缩
+            if not self.store_lf:
+                # 局部帧和非局部帧都会被缓存
+                self.m_k.append(k_temp.detach())    # debug
+                self.m_v.append(v.detach())
+            else:
+                # 只缓存局部帧
+                self.m_k.append(k_lf.detach())
+                self.m_v.append(v_lf.detach())
 
             # 保持记忆力的最大长度
             if len(self.m_k) > self.max_len:
@@ -1033,6 +1090,7 @@ class TemporalFocalTransformerBlock(nn.Module):
         max_mem_len (int):  Max memory length. Unit: Forward.
         compression_factor (int):  Memory compression factor on channel dimension.
         mem_pool (bool): Whether use pooling to reduce memory spatial size.
+        store_lf (bool): If True, only local frames will be cached in the memory. Only work with mem_pool=False.
     """
     def __init__(self,
                  dim,
@@ -1050,7 +1108,8 @@ class TemporalFocalTransformerBlock(nn.Module):
                  memory=False,
                  max_mem_len=4,
                  compression_factor=4,
-                 mem_pool=False):
+                 mem_pool=False,
+                 store_lf=False):
         super().__init__()
         self.dim = dim
         self.num_heads = num_heads
@@ -1102,12 +1161,18 @@ class TemporalFocalTransformerBlock(nn.Module):
                                            memory=self.memory,
                                            max_mem_len=max_mem_len,
                                            compression_factor=compression_factor,
-                                           mem_pool=mem_pool)
+                                           mem_pool=mem_pool,
+                                           store_lf=store_lf)
 
         self.norm2 = norm_layer(dim)
         self.mlp = FusionFeedForward(dim, n_vecs=n_vecs, t2t_params=t2t_params)
 
     def forward(self, x):
+
+        if self.memory:
+            # 记忆力需要额外传入局部帧的时间长度
+            l_t = x[2]
+
         output_size = x[1]
         x = x[0]
 
@@ -1166,7 +1231,12 @@ class TemporalFocalTransformerBlock(nn.Module):
                 x_window_masks_all += [None]
 
         # nW*B, T*window_size*window_size, C
-        attn_windows = self.attn(x_windows_all, mask_all=x_window_masks_all)
+        if not self.memory:
+            # default
+            attn_windows = self.attn(x_windows_all, mask_all=x_window_masks_all)
+        else:
+            # memory build in, with l_t as input
+            attn_windows = self.attn(x_windows_all, mask_all=x_window_masks_all, l_t=l_t)
 
         # merge windows
         attn_windows = attn_windows.view(-1, T, self.window_size[0],
@@ -1185,4 +1255,9 @@ class TemporalFocalTransformerBlock(nn.Module):
             x = x + self.mlp(y.view(B, T * H * W, C), (H * 3, W * 3)).view(
                 B, T, H, W, C)
 
-        return x, output_size
+        if self.memory:
+            # 记忆力需要额外传入局部帧的时间长度
+            return x, output_size, l_t
+        else:
+            # default
+            return x, output_size

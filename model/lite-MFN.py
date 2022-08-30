@@ -137,7 +137,7 @@ class deconv(nn.Module):
 class InpaintGenerator(BaseNetwork):
     def __init__(self, init_weights=True, flow_align=True, skip_dcn=False, flow_guide=False,
                  token_fusion=False, token_fusion_simple=False, fusion_skip_connect=False,
-                 memory=False, max_mem_len=4, compression_factor=4, mem_pool=False):
+                 memory=False, max_mem_len=8, compression_factor=4, mem_pool=False, store_lf=False):
         super(InpaintGenerator, self).__init__()
         # channel = 256   # default
         # hidden = 512    # default
@@ -161,9 +161,10 @@ class InpaintGenerator(BaseNetwork):
         self.memory = memory
 
         # if self.memory:
-        max_mem_len = max_mem_len            # 记忆的最长存储时间，以forward次数为单位
+        max_mem_len = max_mem_len                   # 记忆的最长存储时间，以forward次数为单位
         compression_factor = compression_factor     # 记忆张量的压缩系数，通道以及空间共用
-        mem_pool = mem_pool           # 是否使用池化来进一步在空间上压缩记忆张量
+        mem_pool = mem_pool                         # 是否使用池化来进一步在空间上压缩记忆张量
+        store_lf = store_lf                         # 是否仅在记忆缓存中存储局部帧的kv张量
 
         # encoder
         # self.encoder = Encoder()    # default
@@ -307,7 +308,8 @@ class InpaintGenerator(BaseNetwork):
                                                   memory=self.memory,
                                                   max_mem_len=max_mem_len,
                                                   compression_factor=compression_factor,
-                                                  mem_pool=mem_pool),)
+                                                  mem_pool=mem_pool,
+                                                  store_lf=store_lf),)
             self.transformer = nn.Sequential(*blocks)
         else:
             # 根据token聚合指数修改temporal focal transformer
@@ -430,7 +432,11 @@ class InpaintGenerator(BaseNetwork):
             trans_feat = tokens
             trans_feat = self.sc(trans_feat, t, fold_output_size)
         else:
-            trans_feat = self.transformer([trans_feat, fold_output_size])   # temporal focal trans block
+            if not self.memory:
+                trans_feat = self.transformer([trans_feat, fold_output_size])   # default temporal focal trans block
+            else:
+                trans_feat = self.transformer([trans_feat, fold_output_size, l_t])  # add local frame nums as input
+            # 软组合
             trans_feat = self.sc(trans_feat[0], t, fold_output_size)
 
         trans_feat = trans_feat.view(b, t, -1, h, w)

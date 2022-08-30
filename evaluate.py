@@ -157,7 +157,7 @@ def main_worker(args):
                 if args.timing:
                     torch.cuda.synchronize()
                     time_start = time.time()
-                pred_img, _ = model(masked_frames, len(neighbor_ids))
+                pred_img, _ = model(masked_frames, len(neighbor_ids))   # forward里会输入局部帧数量来对两种数据分开处理
                 if args.timing:
                     torch.cuda.synchronize()
                     time_end = time.time()

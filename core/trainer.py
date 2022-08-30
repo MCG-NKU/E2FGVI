@@ -107,16 +107,24 @@ class Trainer:
 
             if self.memory:
                 # 额外输入记忆力需要的参数
+                # 是否使用空间池化压缩记忆缓存
                 if config['model']['mem_pool'] != 0:
                     self.mem_pool = True
                 else:
                     self.mem_pool = False
 
+                # 是否仅存储局部帧的记忆kv
+                if config['model']['store_lf'] != 0:
+                    self.store_lf = True
+                else:
+                    self.store_lf = False
+
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,
                     token_fusion_simple=self.token_fusion_simple, fusion_skip_connect=self.fusion_skip_connect,
                     memory=self.memory, max_mem_len=config['model']['max_mem_len'],
-                    compression_factor=config['model']['compression_factor'], mem_pool=self.mem_pool)
+                    compression_factor=config['model']['compression_factor'], mem_pool=self.mem_pool,
+                    store_lf=self.store_lf)
             else:
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,

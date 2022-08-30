@@ -70,14 +70,14 @@ datasets/
 退出并杀死当前会话：ctrl+d
 
 # 远程连接tensorboard
-ssh -p 29837 -NL 8008:localhost:6006 root@hz-t2.matpool.com
+ssh -p 29837 -NL 8008:localhost:9009 root@hz-t2.matpool.com
 *9[G6]=zJJ#i0Z%Q
 输入密码后会卡死，直接新开一个终端启动tb就好了
 
 # 打开tb
 退出环境：conda deactivate
 cd /mnt/WORKSPACE/E2FGVI-hao/
-tensorboard --logdir='release_model/' --port=6006
+tensorboard --logdir='release_model/' --port=9009
 http://127.0.0.1:8008/
 ####################################################
 
@@ -208,13 +208,24 @@ python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --ckpt
 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.37/0.9359/0.247      # PSNR降低0.24(对比无记忆力下降0.74)
 All average forward run time: (0.058200) per frame  [矩池云3090]
 
-# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减2 [tmux1] 约需要h
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减2 [tmux1] 约需要55.5h
 CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_lite-MFN-mem-T8C2.json
 
-# 训练e2fgvi-lite来对比序列化dataloader的训练不稳定导致的精度退化 [3090Ti]
+# 训练e2fgvi-lite来对比序列化dataloader的训练不稳定导致的精度退化 [已完成] 需要39.11h
 python train.py -c configs/ablation_e2fgvi_hq-lite-seq.json
+python evaluate.py --model e2fgvi_hq-lite --dataset davis --data_root datasets/ --ckpt release_model/e2fgvi_hq-lite_ablation_e2fgvi_hq-lite-seq\gen_250000.pth --timing
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.86/0.9400/0.238     # PSNR提升0.25？？？？ 序列化训练lite-MFN会怎么样呢
+All average forward run time: (0.030233) per frame [本地3090Ti]
 
-# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4，学习率降低4倍来稳定训练loss [tmux0] 约需要52.5h
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4，学习率降低4倍来稳定训练loss [已停止100k]
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T8C4-lr0.25.json
+调低学习率并没有使得序列化训练更加稳定
 
 # 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长4，通道缩减1 [未开始] 约需要h
+
+# 训练lite-MFN来对比序列化dataloader的训练不稳定导致的精度退化or提升 [3090Ti] 约需要44.5h
+python train.py -c configs/ablation_lite-MFN-seq.json
+
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4，记忆缓存只存储局部帧，防止随机的非局部帧干扰模式学习 [未开始] 约需要h
+python train.py -c configs/ablation_lite-MFN-mem-T8C4-LF.json
+python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --good_fusion --timing --memory
