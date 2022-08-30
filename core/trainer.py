@@ -119,12 +119,18 @@ class Trainer:
                 else:
                     self.store_lf = False
 
+                # 是否在增强前对齐缓存和当前帧的kv
+                if config['model']['align_cache'] != 0:
+                    self.align_cache = True
+                else:
+                    self.align_cache = False
+
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,
                     token_fusion_simple=self.token_fusion_simple, fusion_skip_connect=self.fusion_skip_connect,
                     memory=self.memory, max_mem_len=config['model']['max_mem_len'],
                     compression_factor=config['model']['compression_factor'], mem_pool=self.mem_pool,
-                    store_lf=self.store_lf)
+                    store_lf=self.store_lf, align_cache=self.align_cache)
             else:
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,

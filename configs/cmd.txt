@@ -226,6 +226,16 @@ CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T8C4-lr0
 # 训练lite-MFN来对比序列化dataloader的训练不稳定导致的精度退化or提升 [3090Ti] 约需要44.5h
 python train.py -c configs/ablation_lite-MFN-seq.json
 
-# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4，记忆缓存只存储局部帧，防止随机的非局部帧干扰模式学习 [未开始] 约需要h
-python train.py -c configs/ablation_lite-MFN-mem-T8C4-LF.json
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4，记忆缓存只存储局部帧，防止随机的非局部帧干扰模式学习 [tmux0] 约需要h
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T8C4-LF.json
+python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --good_fusion --timing --memory
+
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4，记忆缓存只存储局部帧，在增强当前帧前对齐缓存 [3090] 约需要h
+# 在压缩记忆缓存后使用光流进行token对齐，优点是可以计算缓存里每一帧与当前帧的光流并进行对齐
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T8C4-LF-align.json
+python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --good_fusion --timing --memory
+
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4，记忆缓存只存储局部帧，在增强当前帧前对齐缓存 [未开始] 约需要h
+# 在压缩记忆缓存前使用光流进行token对齐，优点是上一帧到当前帧的光流计算更准确，缺点是不能对齐缓存里的其他已经压缩过的记忆(除非池化)，并且计算开销更大，最好只维持一次迭代的记忆缓存
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T8C4-LF-align_before.json
 python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --good_fusion --timing --memory

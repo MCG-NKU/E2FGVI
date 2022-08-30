@@ -17,6 +17,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from model.modules.feat_prop import flow_warp
+
 
 class SoftSplit(nn.Module):
     def __init__(self, channel, hidden, kernel_size, stride, padding,
@@ -204,6 +206,20 @@ class Mlp(nn.Module):
         x = self.fc2(x)
         x = self.drop(x)
         return x
+
+
+class FlowHead(nn.Module):
+    "Flow head for compute token flow"
+    def __init__(self, input_dim, hidden_factor=2):
+        super(FlowHead, self).__init__()
+
+        hidden_dim = input_dim * hidden_factor
+        self.conv1 = nn.Conv2d(input_dim, hidden_dim, 3, padding=1)
+        self.conv2 = nn.Conv2d(hidden_dim, 2, 3, padding=1)
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, x):
+        return self.conv2(self.relu(self.conv1(x)))
 
 
 class SoftComp(nn.Module):
@@ -593,7 +609,7 @@ class WindowAttentionMem(nn.Module):
     """
     def __init__(self, dim, expand_size, window_size, focal_window,
                  focal_level, num_heads, qkv_bias, pool_method,
-                 memory, max_mem_len, compression_factor, mem_pool, store_lf):
+                 memory, max_mem_len, compression_factor, mem_pool, store_lf, align_cache):
 
         super().__init__()
         self.dim = dim
@@ -609,6 +625,7 @@ class WindowAttentionMem(nn.Module):
         self.memory = memory
         self.mem_pool = mem_pool
         self.store_lf = store_lf
+        self.align_cache = align_cache
 
         if any(i > 0 for i in self.expand_size) and focal_level > 0:
             # get mask for rolled k and rolled v
@@ -720,6 +737,13 @@ class WindowAttentionMem(nn.Module):
                                           math.floor(self.focal_window[1] * 4 / self.compression_factor),
                                           self.focal_window[0] * 4 * self.focal_window[1] * 4, bias=True)
 
+            if self.align_cache:
+                # 使用光流对齐缓存
+                self.flow_head = FlowHead(input_dim=(dim + dim // self.compression_factor), hidden_factor=2)
+                # 缓存对齐的记忆张量防止两次backward错误
+                self.m_k_aligned = []  # 缓存的已对齐memory keys
+                self.m_v_aligned = []  # 缓存的已对齐memory keys
+
     def forward(self, x_all, mask_all=None, l_t=5):
         """
         Args:
@@ -796,17 +820,72 @@ class WindowAttentionMem(nn.Module):
                         cm_k = self.f_k(k_lf)
                         cm_v = self.f_v(v_lf)
 
+                    if self.align_cache:
+                        # 在增强前将缓存里面所有的记忆与当前迭代的k v对齐
+                        # 在记忆缓存的最后一帧被压缩后进行对齐
+                        cm_k = cm_k.reshape(B * l_t, C // self.compression_factor, nH, nW)  # B*Lt, C_compress, nH, nW
+                        cm_v = cm_v.reshape(B * l_t, C // self.compression_factor, nH, nW)  # B*Lt, C_compress, nH, nW
+                        k_lf = k_lf.reshape(B * l_t, C, nH, nW)                             # B*Lt, C, nH, nW
+                        v_lf = v_lf.reshape(B * l_t, C, nH, nW)                             # B*Lt, C, nH, nW
+
+                        token_flow_k = self.flow_head(torch.cat((cm_k, k_lf), dim=1)).reshape(B*l_t, nH, nW, 2)
+                        token_flow_v = self.flow_head(torch.cat((cm_v, v_lf), dim=1)).reshape(B * l_t, nH, nW, 2)
+
+                        cm_k = flow_warp(cm_k, token_flow_k)                                # B*Lt, C, nH, nW
+                        cm_v = flow_warp(cm_v, token_flow_v)                                # B*Lt, C, nH, nW
+                        cm_k = cm_k.reshape(B, l_t, nH, nW, C // self.compression_factor)
+                        cm_v = cm_v.reshape(B, l_t, nH, nW, C // self.compression_factor)
+
+                        # 对齐缓存里的其他帧，注意因为缓存里的最后一次迭代还没被压缩，所以不需要对齐，上面的就是对齐最后一次迭代的流程
+                        self.m_k_aligned = []   # 对齐的长度会比不对齐的list长度少1
+                        self.m_v_aligned = []   # 之所以新创建list是为了防止2次梯度反传报错，如果使用retain graph会导致显存消耗增加
+                        for cache_index in range(0, len(self.m_k)-1):
+                            k_mem = self.m_k[cache_index]
+                            v_mem = self.m_v[cache_index]
+                            k_mem = k_mem.reshape(B * l_t, C // self.compression_factor, nH,
+                                                  nW)  # B*Lt, C_compress, nH, nW
+                            v_mem = v_mem.reshape(B * l_t, C // self.compression_factor, nH,
+                                                  nW)  # B*Lt, C_compress, nH, nW
+
+                            # calc token flow
+                            token_flow_k = self.flow_head(torch.cat((k_mem, k_lf), dim=1)).reshape(B * l_t, nH, nW, 2)
+                            token_flow_v = self.flow_head(torch.cat((v_mem, v_lf), dim=1)).reshape(B * l_t, nH, nW, 2)
+
+                            # warp tokens
+                            k_mem = flow_warp(k_mem, token_flow_k)  # B*Lt, C, nH, nW
+                            v_mem = flow_warp(v_mem, token_flow_v)  # B*Lt, C, nH, nW
+
+                            # retrieve
+                            k_mem = k_mem.reshape(B, l_t, nH, nW, C // self.compression_factor)
+                            v_mem = v_mem.reshape(B, l_t, nH, nW, C // self.compression_factor)
+                            # self.m_k[cache_index] = k_mem
+                            # self.m_v[cache_index] = v_mem
+                            self.m_k_aligned.append(k_mem)
+                            self.m_v_aligned.append(v_mem)
+
+                        # 恢复当前k v的shape
+                        k_lf = k_lf.reshape(B, l_t, nH, nW, C)
+                        v_lf = v_lf.reshape(B, l_t, nH, nW, C)
+
                     # 增强局部帧的qkv
                     q_lf = self.lin_q(q_lf)
                     if len(self.m_k) == self.max_len:
                         # 缓存满了的情况，不需要补充临时的记忆张量
                         # 因为缓存里的最后一帧还没被压缩的替换，所以不取最后一帧的缓存，直接拿压缩完的cm就可
-                        k_lf = self.lin_k(torch.cat((
-                            torch.cat(self.m_k[:-1], dim=4), cm_k, k_lf), dim=4))
-                        v_lf = self.lin_v(torch.cat((
-                            torch.cat(self.m_v[:-1], dim=4), cm_v, v_lf), dim=4))
+                        if not self.align_cache:
+                            # 把没对齐的和当前iter的k v融合
+                            k_lf = self.lin_k(torch.cat((
+                                torch.cat(self.m_k[:-1], dim=4), cm_k, k_lf), dim=4))
+                            v_lf = self.lin_v(torch.cat((
+                                torch.cat(self.m_v[:-1], dim=4), cm_v, v_lf), dim=4))
+                        else:
+                            # 把对齐的和当前iter的k v融合
+                            k_lf = self.lin_k(torch.cat((
+                                torch.cat(self.m_k_aligned[:], dim=4), cm_k, k_lf), dim=4))
+                            v_lf = self.lin_v(torch.cat((
+                                torch.cat(self.m_v_aligned[:], dim=4), cm_v, v_lf), dim=4))
                     else:
-                        # 缓存还没有存满，需要负责当前帧的张量
+                        # 缓存还没有存满，需要复制当前帧的张量
                         repeat_k = self.max_len - len(self.m_k)
                         repeat_v = self.max_len - len(self.m_v)
                         if len(self.m_k) == 0:
@@ -819,10 +898,18 @@ class WindowAttentionMem(nn.Module):
                             k_rep_feat = k_rep_feat.repeat(1, 1, 1, 1, repeat_k)
                             v_rep_feat = self.f_v(v_lf)
                             v_rep_feat = v_rep_feat.repeat(1, 1, 1, 1, repeat_v)
-                            k_lf = self.lin_k(torch.cat((
-                                torch.cat(self.m_k[:-1], dim=4), cm_k, k_rep_feat, k_lf), dim=4))
-                            v_lf = self.lin_v(torch.cat((
-                                torch.cat(self.m_v[:-1], dim=4), cm_v, v_rep_feat, v_lf), dim=4))
+                            if not self.align_cache:
+                                # 把没对齐的和当前iter的k v融合
+                                k_lf = self.lin_k(torch.cat((
+                                    torch.cat(self.m_k[:-1], dim=4), cm_k, k_rep_feat, k_lf), dim=4))
+                                v_lf = self.lin_v(torch.cat((
+                                    torch.cat(self.m_v[:-1], dim=4), cm_v, v_rep_feat, v_lf), dim=4))
+                            else:
+                                # 把对齐的和当前iter的k v融合
+                                k_lf = self.lin_k(torch.cat((
+                                    torch.cat(self.m_k_aligned[:], dim=4), cm_k, k_rep_feat, k_lf), dim=4))
+                                v_lf = self.lin_v(torch.cat((
+                                    torch.cat(self.m_v_aligned[:], dim=4), cm_v, v_rep_feat, v_lf), dim=4))
 
                     # 把增强后的局部帧qkv还原到所有的qkv中
                     q[:, :l_t, ...] = q_lf
@@ -1091,6 +1178,8 @@ class TemporalFocalTransformerBlock(nn.Module):
         compression_factor (int):  Memory compression factor on channel dimension.
         mem_pool (bool): Whether use pooling to reduce memory spatial size.
         store_lf (bool): If True, only local frames will be cached in the memory. Only work with mem_pool=False.
+        align_cache (bool): If True, memory cache will be aligned to current frames before fusion.
+                            Only work with mem_pool=False and store_lf=True.
     """
     def __init__(self,
                  dim,
@@ -1109,7 +1198,8 @@ class TemporalFocalTransformerBlock(nn.Module):
                  max_mem_len=4,
                  compression_factor=4,
                  mem_pool=False,
-                 store_lf=False):
+                 store_lf=False,
+                 align_cache=False):
         super().__init__()
         self.dim = dim
         self.num_heads = num_heads
@@ -1162,7 +1252,8 @@ class TemporalFocalTransformerBlock(nn.Module):
                                            max_mem_len=max_mem_len,
                                            compression_factor=compression_factor,
                                            mem_pool=mem_pool,
-                                           store_lf=store_lf)
+                                           store_lf=store_lf,
+                                           align_cache=align_cache)
 
         self.norm2 = norm_layer(dim)
         self.mlp = FusionFeedForward(dim, n_vecs=n_vecs, t2t_params=t2t_params)

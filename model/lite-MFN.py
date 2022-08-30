@@ -137,7 +137,7 @@ class deconv(nn.Module):
 class InpaintGenerator(BaseNetwork):
     def __init__(self, init_weights=True, flow_align=True, skip_dcn=False, flow_guide=False,
                  token_fusion=False, token_fusion_simple=False, fusion_skip_connect=False,
-                 memory=False, max_mem_len=8, compression_factor=4, mem_pool=False, store_lf=False):
+                 memory=False, max_mem_len=8, compression_factor=4, mem_pool=False, store_lf=False, align_cache=False):
         super(InpaintGenerator, self).__init__()
         # channel = 256   # default
         # hidden = 512    # default
@@ -165,6 +165,7 @@ class InpaintGenerator(BaseNetwork):
         compression_factor = compression_factor     # 记忆张量的压缩系数，通道以及空间共用
         mem_pool = mem_pool                         # 是否使用池化来进一步在空间上压缩记忆张量
         store_lf = store_lf                         # 是否仅在记忆缓存中存储局部帧的kv张量
+        align_cache = align_cache                   # 是否在增强 k v 前对齐缓存和当前帧
 
         # encoder
         # self.encoder = Encoder()    # default
@@ -309,7 +310,8 @@ class InpaintGenerator(BaseNetwork):
                                                   max_mem_len=max_mem_len,
                                                   compression_factor=compression_factor,
                                                   mem_pool=mem_pool,
-                                                  store_lf=store_lf),)
+                                                  store_lf=store_lf,
+                                                  align_cache=align_cache),)
             self.transformer = nn.Sequential(*blocks)
         else:
             # 根据token聚合指数修改temporal focal transformer
