@@ -28,7 +28,9 @@
         "memory": 1,
         "max_mem_len": 8,
         "compression_factor": 2,
-        "mem_pool": 0
+        "mem_pool": 0,
+        "store_lf": 0,
+        "align_cache": 0
     },
     "trainer": {
         "type": "Adam",
