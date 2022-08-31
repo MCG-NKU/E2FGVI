@@ -137,7 +137,8 @@ class deconv(nn.Module):
 class InpaintGenerator(BaseNetwork):
     def __init__(self, init_weights=True, flow_align=True, skip_dcn=False, flow_guide=False,
                  token_fusion=False, token_fusion_simple=False, fusion_skip_connect=False,
-                 memory=False, max_mem_len=8, compression_factor=4, mem_pool=False, store_lf=False, align_cache=False):
+                 memory=False, max_mem_len=8, compression_factor=4, mem_pool=False, store_lf=False, align_cache=False,
+                 sub_token_align=False, sub_factor=1):
         super(InpaintGenerator, self).__init__()
         # channel = 256   # default
         # hidden = 512    # default
@@ -166,6 +167,8 @@ class InpaintGenerator(BaseNetwork):
         mem_pool = mem_pool                         # 是否使用池化来进一步在空间上压缩记忆张量
         store_lf = store_lf                         # 是否仅在记忆缓存中存储局部帧的kv张量
         align_cache = align_cache                   # 是否在增强 k v 前对齐缓存和当前帧
+        sub_token_align = sub_token_align           # 是否在对齐缓存和当前帧时对token通道分组来实现sub-token对齐
+        sub_factor = sub_factor                     # sub-token对齐的分组系数，分组系数越大计算损耗越高，分辨率精度越高
 
         # encoder
         # self.encoder = Encoder()    # default
@@ -311,7 +314,9 @@ class InpaintGenerator(BaseNetwork):
                                                   compression_factor=compression_factor,
                                                   mem_pool=mem_pool,
                                                   store_lf=store_lf,
-                                                  align_cache=align_cache),)
+                                                  align_cache=align_cache,
+                                                  sub_token_align=sub_token_align,
+                                                  sub_factor=sub_factor),)
             self.transformer = nn.Sequential(*blocks)
         else:
             # 根据token聚合指数修改temporal focal transformer

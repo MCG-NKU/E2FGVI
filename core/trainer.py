@@ -125,12 +125,21 @@ class Trainer:
                 else:
                     self.align_cache = False
 
+                # 是否在对齐时对token通道分组进行，来实现sub-token的对齐
+                if config['model']['sub_token_align'] != 0:
+                    self.sub_token_align = True
+                    self.sub_factor = config['model']['sub_token_align']
+                else:
+                    self.sub_token_align = False
+                    self.sub_factor = 1
+
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,
                     token_fusion_simple=self.token_fusion_simple, fusion_skip_connect=self.fusion_skip_connect,
                     memory=self.memory, max_mem_len=config['model']['max_mem_len'],
                     compression_factor=config['model']['compression_factor'], mem_pool=self.mem_pool,
-                    store_lf=self.store_lf, align_cache=self.align_cache)
+                    store_lf=self.store_lf, align_cache=self.align_cache, sub_token_align=self.sub_token_align,
+                    sub_factor=self.sub_factor)
             else:
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,
