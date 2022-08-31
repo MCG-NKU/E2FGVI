@@ -214,7 +214,7 @@ CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_lite-MFN-mem-T8C2.jso
 # 训练e2fgvi-lite来对比序列化dataloader的训练不稳定导致的精度退化 [已完成] 需要39.11h
 python train.py -c configs/ablation_e2fgvi_hq-lite-seq.json
 python evaluate.py --model e2fgvi_hq-lite --dataset davis --data_root datasets/ --ckpt release_model/e2fgvi_hq-lite_ablation_e2fgvi_hq-lite-seq\gen_250000.pth --timing
-[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.86/0.9400/0.238     # PSNR提升0.25？？？？ 序列化训练lite-MFN会怎么样呢
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.86/0.9400/0.238     # PSNR提升0.25？？？？ 序列化训练lite-MFN会怎么样呢：答案是也不会降低精度
 All average forward run time: (0.030233) per frame [本地3090Ti]
 
 # 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4，学习率降低4倍来稳定训练loss [已停止100k]
@@ -223,8 +223,12 @@ CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T8C4-lr0
 
 # 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长4，通道缩减1 [未开始] 约需要h
 
-# 训练lite-MFN来对比序列化dataloader的训练不稳定导致的精度退化or提升 [3090Ti] 约需要44.5h
+# 训练lite-MFN来对比序列化dataloader的训练不稳定导致的精度退化or提升 [已完成] 需要44.5h
 python train.py -c configs/ablation_lite-MFN-seq.json
+python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --ckpt release_model/lite-MFN_ablation_lite-MFN-seq\gen_250000.pth --good_fusion --timing
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.12/0.9432/0.226     # PSNR提升0.51 目前最高
+All average forward run time: (0.070436) per frame [本地3090Ti]
+序列化训练并没有影响e2fgvi-lite和lite-MFN的精度
 
 # 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4，记忆缓存只存储局部帧，防止随机的非局部帧干扰模式学习 [tmux0] 约需要h
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T8C4-LF.json
