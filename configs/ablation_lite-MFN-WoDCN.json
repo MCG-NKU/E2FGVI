@@ -2,7 +2,6 @@
     "seed": 2021,
     "save_dir": "release_model/",
     "train_data_loader": {
-        "sequence_load": 0,
         "name": "youtube-vos",
         "data_root": "datasets",
         "w": 432,
@@ -18,20 +17,21 @@
         "GAN_LOSS": "hinge"
     },
     "model": {
-        "net": "e2fgvi_hq",
+        "net": "lite-MFN",
         "no_dis": 0,
-        "memory": 0
+        "skip_dcn": 1,
+        "flow_guide": 0
     },
     "trainer": {
         "type": "Adam",
         "beta1": 0,
         "beta2": 0.99,
-        "lr": 1e-4,
-        "batch_size": 8,
-        "num_workers": 2,
+        "lr": 0.25e-4,
+        "batch_size": 2,
+        "num_workers": 4,
         "log_freq": 100,
         "save_freq": 5e3,
-        "iterations": 50e4,
+        "iterations": 25e4,
         "scheduler": {
             "type": "MultiStepLR",
             "milestones": [

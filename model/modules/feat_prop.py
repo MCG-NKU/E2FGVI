@@ -52,26 +52,73 @@ class SecondOrderDeformableAlignment(ModulatedDeformConv2d):
         # mask
         mask = torch.sigmoid(mask)
 
+        # 默认使用的2阶对齐方法是dcn-v2，也就是调制可变形卷积，所谓的调制就是新增了一个和图像等大的mask，范围在0-1
         return modulated_deform_conv2d(x, offset, mask, self.weight, self.bias,
                                        self.stride, self.padding,
                                        self.dilation, self.groups,
                                        self.deform_groups)
 
 
+class ConvBNReLU(nn.Module):
+    """Conv with BN and ReLU, used for Simple Second Fusion"""
+
+    def __init__(self,
+                 in_chan,
+                 out_chan,
+                 ks=3,
+                 stride=1,
+                 padding=1,
+                 *args,
+                 **kwargs):
+        super(ConvBNReLU, self).__init__()
+        self.conv = nn.Conv2d(
+            in_chan,
+            out_chan,
+            kernel_size=ks,
+            stride=stride,
+            padding=padding,
+            bias=False)
+        self.bn = torch.nn.BatchNorm2d(out_chan)
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.bn(x)
+        x = self.relu(x)
+        return x
+
+    def init_weight(self):
+        for ly in self.children():
+            if isinstance(ly, nn.Conv2d):
+                nn.init.kaiming_normal_(ly.weight, a=1)
+                if not ly.bias is None: nn.init.constant_(ly.bias, 0)
+
+
 class BidirectionalPropagation(nn.Module):
-    def __init__(self, channel, flow_align=False):
+    def __init__(self, channel, flow_align=False, skip_dcn=False):
         super(BidirectionalPropagation, self).__init__()
         modules = ['backward_', 'forward_']
-        self.deform_align = nn.ModuleDict()
+
         self.backbone = nn.ModuleDict()
         self.channel = channel
 
         # 使用正确的对齐方式(True), 使用默认对齐方式(False)
         self.flow_align = flow_align
 
+        # 跳过dcn，认为光流足够准，使用1x1卷积融合对齐的特征
+        self.skip_dcn = skip_dcn
+        if not self.skip_dcn:
+            self.deform_align = nn.ModuleDict()
+        else:
+            self.simple_fusion = nn.ModuleDict()
+
         for i, module in enumerate(modules):
-            self.deform_align[module] = SecondOrderDeformableAlignment(
-                2 * channel, channel, 3, padding=1, deform_groups=16)
+            if not self.skip_dcn:
+                self.deform_align[module] = SecondOrderDeformableAlignment(
+                    2 * channel, channel, 3, padding=1, deform_groups=16)
+            else:
+                self.simple_fusion[module] = ConvBNReLU(in_chan=3 * channel, out_chan=channel,
+                                                        ks=1, stride=1, padding=0)
 
             self.backbone[module] = nn.Sequential(
                 nn.Conv2d((2 + i) * channel, channel, 3, 1, 1),
@@ -114,6 +161,8 @@ class BidirectionalPropagation(nn.Module):
 
                     if i > 0:
                         flow_n1 = flows[:, flow_idx[i], :, :, :]
+                        # cond是使用warp后的此前特征，n1表示光流第一次warp
+                        # 在backward里，作者想把 t5 warp 到 t4，但是用了 t1 到 t0 的光流，用错了
                         cond_n1 = flow_warp(feat_prop, flow_n1.permute(0, 2, 3, 1))
 
                         # initialize second-order features
@@ -150,7 +199,14 @@ class BidirectionalPropagation(nn.Module):
                     feat_current = feats['spatial'][mapping_idx[idx]]
 
                     if i > 0:
-                        flow_n1 = flows[:, flow_idx[idx], :, :, :]
+                        if 'backward' in module_name:
+                            flow_n1 = flows[:, flow_idx[idx]+1, :, :, :]
+                            # print('Backward, using back flow: (%f) for warp to frame (%f)'
+                            #       % (flow_idx[idx]+1, mapping_idx[idx]))
+                        else:
+                            flow_n1 = flows[:, flow_idx[i], :, :, :]
+                            # print('Forward, using forward flow: (%f) for warp to frame (%f)'
+                            #       % (flow_idx[i], mapping_idx[idx]))
                         cond_n1 = flow_warp(feat_prop, flow_n1.permute(0, 2, 3, 1))
 
                         # initialize second-order features
@@ -159,17 +215,28 @@ class BidirectionalPropagation(nn.Module):
                         cond_n2 = torch.zeros_like(cond_n1)
                         if i > 1:
                             feat_n2 = feats[module_name][-2]
-                            flow_n2 = flows[:, flow_idx[idx - 1], :, :, :]
+                            if 'backward' in module_name:
+                                flow_n2 = flows[:, flow_idx[idx]+2, :, :, :]
+                                # print('Backward, using second back flow: (%f) for warp to frame (%f)'
+                                #       % (flow_idx[idx] + 2, mapping_idx[idx]))
+                            else:
+                                flow_n2 = flows[:, flow_idx[i - 1], :, :, :]
+                                # print('Forward, using second forward flow: (%f) for warp to frame (%f)'
+                                #       % (flow_idx[i - 1], mapping_idx[idx]))
                             flow_n2 = flow_n1 + flow_warp(
                                 flow_n2, flow_n1.permute(0, 2, 3, 1))
                             cond_n2 = flow_warp(feat_n2,
                                                 flow_n2.permute(0, 2, 3, 1))
 
                         cond = torch.cat([cond_n1, feat_current, cond_n2], dim=1)
-                        feat_prop = torch.cat([feat_prop, feat_n2], dim=1)
-                        feat_prop = self.deform_align[module_name](feat_prop, cond,
-                                                                   flow_n1,
-                                                                   flow_n2)
+                        if not self.skip_dcn:
+                            feat_prop = torch.cat([feat_prop, feat_n2], dim=1)
+                            feat_prop = self.deform_align[module_name](feat_prop, cond,
+                                                                       flow_n1,
+                                                                       flow_n2)
+                        else:
+                            # 认为两次光流对齐足够准，直接将对齐后的特征用1x1卷积融合
+                            feat_prop = self.simple_fusion[module_name](cond)
 
                     feat = [feat_current] + [
                         feats[k][idx]
@@ -183,6 +250,8 @@ class BidirectionalPropagation(nn.Module):
 
             if 'backward' in module_name:
                 feats[module_name] = feats[module_name][::-1]
+
+            # print('#' * 20)
 
         outputs = []
         for i in range(0, t):

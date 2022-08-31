@@ -19,6 +19,8 @@ datasets/
 --ckpt
 release_model/E2FGVI-CVPR22.pth
 
+CUDA_VISIBLE_DEVICES=1 python evaluate.py --model e2fgvi --dataset davis --data_root datasets/ --timing --ckpt release_model/E2FGVI-CVPR22.pth
+
 # 改进中间帧融合策略0.5，psnr提升0.1
 --model
 e2fgvi
@@ -30,6 +32,37 @@ datasets/
 release_model/E2FGVI-CVPR22.pth
 --good_fusion
 
+# 测试e2fgvi bs2 250k
+--model
+e2fgvi
+--dataset
+davis
+--data_root
+datasets/
+--ckpt
+release_model/e2fgvi_ablation_e2fgvi_baseline/gen_250000.pth
+
+# 测试e2fgvi-lite bs2 250k flow init
+--model
+e2fgvi_hq-lite
+--dataset
+davis
+--data_root
+datasets/
+--ckpt
+release_model/e2fgvi_hq-lite_ablation_e2fgvi_hq-lite-flow-init/gen_250000.pth
+
+CUDA_VISIBLE_DEVICES=1 python evaluate.py --model e2fgvi_hq-lite --dataset davis --data_root datasets/ --ckpt release_model/e2fgvi_hq-lite_ablation_e2fgvi_hq-lite-flow-init/gen_095000.pth
+CUDA_VISIBLE_DEVICES=1 python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --ckpt release_model/lite-MFN_ablation_lite-MFN/gen_095000.pth --good_fusion --timing
+
+# 测试lite-MFN
+--model
+lite-MFN
+--dataset
+davis
+--data_root
+datasets/
+
 #####################################################
 新建会话：tmux new -s SESSION-NAME
 杀死会话：tmux kill-session -t 0
@@ -37,17 +70,22 @@ release_model/E2FGVI-CVPR22.pth
 退出并杀死当前会话：ctrl+d
 
 # 远程连接tensorboard
-ssh -p 29837 -NL 8008:localhost:6006 root@hz-t2.matpool.com
+ssh -p 29837 -NL 8008:localhost:9009 root@hz-t2.matpool.com
 *9[G6]=zJJ#i0Z%Q
 输入密码后会卡死，直接新开一个终端启动tb就好了
 
 # 打开tb
-tensorboard --logdir='release_model/' --port=6006
-http://127.0.0.1:6006/
+退出环境：conda deactivate
+cd /mnt/WORKSPACE/E2FGVI-hao/
+tensorboard --logdir='release_model/' --port=9009
+http://127.0.0.1:8008/
 ####################################################
 
-# 训练e2fgvi-bs2-250k
+# 训练e2fgvi-bs2-250k [已完成]
 python train.py -c configs/ablation_e2fgvi_baseline.json
+[250k, davis]: Finish evaluation... Average Frame PSNR/SSIM/VFID: 30.65/0.9590/0.180
+All average forward run time: (0.074037) per frame [本地3090]
+All average forward run time: (0.072967) per frame [矩池云3090]
 
 # train_e2fgvi_hq-lite.json用于最终实验 bs6 3090单卡 250k 约110h
 
@@ -60,11 +98,148 @@ CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_e2fgvi_hq-lite.json
 # 训练e2fgvi-lite bs2 3090单卡 250k back光流对齐 [停止] 确实会好一些,我们自己用
 CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_e2fgvi_hq-lite-flow-align.json
 
-# 训练e2fgvi-lite bs2 3090单卡 250k back光流不对齐 SpyNet预训练初始化 [tmux 1] 用这个当作baseline 速度也在0.04s左右
+# 训练e2fgvi-lite bs2 3090单卡 250k back光流不对齐 SpyNet预训练初始化 [已完成] 用这个当作baseline 速度也在0.04s左右
 CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_e2fgvi_hq-lite-flow-init.json
+[95k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.35/0.9362/0.247
+[140k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 27.76/0.9323/0.256
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.61/0.9379/0.230     # Baseline: 28.61
+All average forward run time: (0.030172) per frame [矩池云3090]
 
-# 训练lite-MFN bs2 3090单卡 250k back光流对齐 maskflownetS [tmux 0] 约需要55h
+# 训练lite-MFN bs2 3090单卡 250k back光流真对齐 maskflownetS [已完成] 约需要54.5h
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN.json
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --ckpt release_model/lite-MFN_ablation_lite-MFN/gen_250000.pth --good_fusion --timing
+[95k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.43/0.9356/0.241
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.11/0.9443/0.214     # PSNR提升0.5
+All average forward run time: (0.052142) per frame
+All average forward run time: (0.050412) per frame [矩池云3090]
 
-# 训练lite-MFN bs2 3090单卡 250k back光流对齐 maskflownetS 拆掉后面的dcn对齐？ [未开始]
+# 训练lite-MFN bs2 3090单卡 250k back光流真对齐 maskflownetS 拆掉后面的dcn对齐 认为光流对齐足够精准 [已完成] 约需要41.5h
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-WoDCN.json
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --ckpt release_model/lite-MFN_ablation_lite-MFN-WoDCN\gen_250000.pth --good_fusion --timing
+[140k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.62/0.9357/0.225 已经超过了250k的baseline，乐
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.06/0.9408/0.224     # PSNR提升0.44
+All average forward run time: (0.069357) per frame [本地3090]
+All average forward run time: (0.047785) per frame [矩池云3090]
 
+# 训练lite-MFN bs2 3090单卡 250k back光流真对齐 maskflownetS 光流引导patch embedding [已完成] 需要58.3h
+CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_lite-MFN-flow-guide.json
+这里直接把local frame的光流接到了local frame的后面，forward对应forward，backward对应backward，
+local frame 与光流对齐后t少了一帧，因此non_local_frame多取1帧中间帧; 另外注意代码里常常会把batch和t合并成为bt一个通道
+CUDA_VISIBLE_DEVICES=1 python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --ckpt release_model/lite-MFN_ablation_lite-MFN-flow-guide/gen_250000.pth --good_fusion --timing
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.01/0.9347/0.260     # 不如baseline，可能是由于编码行为不一致导致的
+All average forward run time: (0.051672) per frame [矩池云3090]
+
+# 测试使用 MaskFlowNetS 替换掉 SpyNet 后的E2FGVI速度（与官方测试方法一致）
+All average forward run time: (0.093530) per frame [矩池云3090]
+
+# 测试使用 MaskFlowNetS 替换掉 SpyNet 后, token fusion 0.75*0.75的E2FGVI速度（与官方测试方法一致）
+All average forward run time: (0.072565) per frame [矩池云3090]
+
+# 训练token缩减0.75*0.75的lite-MFN (E2FGVI-lite+MaskFlowNetS+token-spatial-fusion0.75x0.75) [已完成] 约需要52h
+[95k 后由单卡转为双卡训练] 可能因为bs只有2所以双卡也只快了30%左右
+python train.py -c configs/ablation_lite-MFN-token-fusion.json
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --ckpt release_model/lite-MFN_ablation_lite-MFN-token-fusion/gen_250000.pth --good_fusion --timing
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.42/0.9376/0.244     # PSNR降低0.19
+All average forward run time: (0.048722) per frame [矩池云3090]
+
+# 训练token缩减0.75*0.75的lite-MFN 共用1个token缩减和拓展模块 (E2FGVI-lite+MaskFlowNetS+token-spatial-fusion0.75x0.75) [已完成] 需要43.5h
+python train.py -c configs/ablation_lite-MFN-token-fusion-simple.json
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --ckpt release_model/lite-MFN_ablation_lite-MFN-token-fusion-simple/gen_250000.pth --good_fusion --timing
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.48/0.9372/0.255     # PSNR降低0.13
+All average forward run time: (0.071416) per frame  [本地3090]
+
+# 训练token缩减0.75*0.75的lite-MFN 共用1个token缩减和拓展模块，加一个token的跳跃链接和fusion层 [已完成] 需要60.5h
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-token-fusion-simple-skip-connect.json
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --ckpt release_model/lite-MFN_ablation_lite-MFN-token-fusion-simple-skip-connect/gen_250000.pth --good_fusion --timing
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.55/0.9396/0.247     # PSNR降低0.06
+All average forward run time: (0.055883) per frame [矩池云3090]
+
+# 训练token缩减0.75*0.75的lite-MFN 独立token缩减和拓展模块，渐进式token的跳跃链接和fusion层 [已完成] 约需要60h
+CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_lite-MFN-token-fusion-skip-connect.json
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --ckpt release_model/lite-MFN_ablation_lite-MFN-token-fusion-skip-connect/gen_250000.pth --good_fusion --timing
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.14/0.9366/0.251     # PSNR降低0.47
+All average forward run time: (0.054300) per frame
+
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长4，通道缩减4 [已完成] 约需要54h
+python train.py -c configs/ablation_lite-MFN-mem.json
+python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --ckpt release_model/lite-MFN_ablation_lite-MFN-mem/gen_250000.pth --good_fusion --timing --memory
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 27.96/0.9321/0.265     # PSNR降低0.65(对比无记忆力下降1.15)
+
+# 测试不同记忆力设置下的显存消耗以及速度
+----
+E2FGVI_HQ bs2 显存消耗：20.43GB
+----
+lite-MFN 原E2FGVI大小 bs2 显存消耗：20.97GB
+----
+lite-MFN 原E2FGVI大小 bs2 token fusion 不共用 75%x75% 显存消耗：20.52GB
+lite-MFN 原E2FGVI大小 bs2 token fusion 不共用 跳跃链接 75%x75% 显存消耗：23.47GB
+lite-MFN 原E2FGVI大小 bs2 token fusion 共用 75%x75% 显存消耗: 21.01GB
+lite-MFN 原E2FGVI大小 bs2 token fusion 共用 跳跃链接 75%x75% 显存消耗: 21.01GB
+----
+lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减1 记忆时长4 显存消耗：可以运行 [3090]
+lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减1 记忆时长8 显存消耗：显存溢出 [3090]
+lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减1 记忆时长8 拆除dcn 显存消耗：显存溢出 [3090]
+lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减2 记忆时长8 显存消耗：19.26GB [3090]
+----
+lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减4 记忆时长4 显存消耗: 22.96GB 22.96GB
+lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减4 记忆时长8 显存消耗: 23.42GB 23.43GB
+lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减4 记忆时长16 显存消耗: 22.89GB 22.89GB
+lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减4 记忆时长32 显存消耗: 23.50GB 23.34GB
+----
+lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减8 记忆时长4 显存消耗: 22.86GB 22.86GB
+lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减8 记忆时长8 显存消耗: 22.95GB 22.95GB
+lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减8 记忆时长16 显存消耗: 23.01GB 22.26GB
+lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减8 记忆时长32 显存消耗: 22.95GB 22.90GB
+----
+
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4 [已完成] 约需要46.5h
+python train.py -c configs/ablation_lite-MFN-mem-T8C4.json
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.71                   # PSNR提升0.10(对比无记忆力下降0.40)
+
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长4，通道缩减8 [已完成] 需要55h
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T4C8.json
+python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T4C8/gen_250000.pth --good_fusion --timing --memory
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 27.13/0.9285/0.277      # PSNR降低1.48(对比无记忆力下降1.98)
+All average forward run time: (0.060132) per frame [矩池云3090]
+
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减8 [已完成] 需要54.5h
+CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_lite-MFN-mem-T8C8.json
+python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T8C8/gen_250000.pth --good_fusion --timing --memory
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.37/0.9359/0.247      # PSNR降低0.24(对比无记忆力下降0.74)
+All average forward run time: (0.058200) per frame  [矩池云3090]
+
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减2 [tmux1] 约需要55.5h
+CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_lite-MFN-mem-T8C2.json
+
+# 训练e2fgvi-lite来对比序列化dataloader的训练不稳定导致的精度退化 [已完成] 需要39.11h
+python train.py -c configs/ablation_e2fgvi_hq-lite-seq.json
+python evaluate.py --model e2fgvi_hq-lite --dataset davis --data_root datasets/ --ckpt release_model/e2fgvi_hq-lite_ablation_e2fgvi_hq-lite-seq\gen_250000.pth --timing
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.86/0.9400/0.238     # PSNR提升0.25？？？？ 序列化训练lite-MFN会怎么样呢：答案是也不会降低精度
+All average forward run time: (0.030233) per frame [本地3090Ti]
+
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4，学习率降低4倍来稳定训练loss [已停止100k]
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T8C4-lr0.25.json
+调低学习率并没有使得序列化训练更加稳定
+
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长4，通道缩减1 [未开始] 约需要h
+
+# 训练lite-MFN来对比序列化dataloader的训练不稳定导致的精度退化or提升 [已完成] 需要44.5h
+python train.py -c configs/ablation_lite-MFN-seq.json
+python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --ckpt release_model/lite-MFN_ablation_lite-MFN-seq\gen_250000.pth --good_fusion --timing
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.12/0.9432/0.226     # PSNR提升0.51 目前最高
+All average forward run time: (0.070436) per frame [本地3090Ti]
+序列化训练并没有影响e2fgvi-lite和lite-MFN的精度
+
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4，记忆缓存只存储局部帧，防止随机的非局部帧干扰模式学习 [tmux0] 约需要h
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T8C4-LF.json
+python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --good_fusion --timing --memory
+
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4，记忆缓存只存储局部帧，在增强当前帧前对齐缓存 [3090] 约需要h
+# 在压缩记忆缓存后使用光流进行token对齐，优点是可以计算缓存里每一帧与当前帧的光流并进行对齐
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T8C4-LF-align.json
+python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --good_fusion --timing --memory
+
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4，记忆缓存只存储局部帧，在增强当前帧前对齐缓存 [未开始] 约需要h
+# 在压缩记忆缓存前使用光流进行token对齐，优点是上一帧到当前帧的光流计算更准确，缺点是不能对齐缓存里的其他已经压缩过的记忆(除非池化)，并且计算开销更大，最好只维持一次迭代的记忆缓存
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T8C4-LF-align_before.json
+python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --good_fusion --timing --memory

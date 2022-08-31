@@ -16,8 +16,8 @@ from core.dataset import TestDataset
 from core.metrics import calc_psnr_and_ssim, calculate_i3d_activations, calculate_vfid, init_i3d_model
 
 # global variables
-# w, h = 432, 240     # default acc. test setting in e2fgvi for davis dataset
-w, h = 864, 480     # davis res 480x854 default speed test setting in e2fgvi for davis dataset
+w, h = 432, 240     # default acc. test setting in e2fgvi for davis dataset
+# w, h = 864, 480     # davis res 480x854 default speed test setting in e2fgvi for davis dataset
 ref_length = 10     # non-local frames的步幅间隔，此处为每10帧取1帧NLF
 neighbor_stride = 5     # local frames的窗口大小，加上自身则窗口大小为6
 default_fps = 24
@@ -29,6 +29,15 @@ def get_ref_index(neighbor_ids, length):
     for i in range(0, length, ref_length):
         if i not in neighbor_ids:
             ref_index.append(i)
+    return ref_index
+
+
+# sample reference frames from the whole video with mem support
+# 允许相同的局部帧和非局部帧id，保证时间维度的一致性，但是引入了冗余计算？
+def get_ref_index_mem(length):
+    ref_index = []
+    for i in range(0, length, ref_length):
+        ref_index.append(i)
     return ref_index
 
 
@@ -62,6 +71,10 @@ def main_worker(args):
 
     print('Start evaluation...')
 
+    if args.timing:
+        time_all = 0
+        len_all = 0
+
     # create results directory
     result_path = os.path.join('results', f'{args.model}_{args.dataset}')
     if not os.path.exists(result_path):
@@ -74,6 +87,12 @@ def main_worker(args):
 
     for index, items in enumerate(test_loader):
 
+        if args.memory:
+            # 进入新的视频时清空记忆缓存
+            for blk in model.transformer:
+                blk.attn.m_k = []
+                blk.attn.m_v = []
+
         frames, masks, video_name, frames_PIL = items
 
         video_length = frames.size(1)
@@ -84,28 +103,68 @@ def main_worker(args):
         ]
         comp_frames = [None] * video_length     # 补全帧
 
+        if args.timing:
+            len_all += video_length
+
         # complete holes by our model
+        # 当这个循环走完的时候，一段视频已经被补全了
         for f in range(0, video_length, neighbor_stride):
-            neighbor_ids = [
-                i for i in range(max(0, f - neighbor_stride),
-                                 min(video_length, f + neighbor_stride + 1))
-            ]   # neighbor_ids即为Local Frames, 局部帧
-            ref_ids = get_ref_index(neighbor_ids, video_length)     # ref_ids即为Non-Local Frames, 非局部帧
-            selected_imgs = frames[:1, neighbor_ids + ref_ids, :, :, :]
-            selected_masks = masks[:1, neighbor_ids + ref_ids, :, :, :]
+            if not args.memory:
+                # default id with different T
+                neighbor_ids = [
+                    i for i in range(max(0, f - neighbor_stride),
+                                     min(video_length, f + neighbor_stride + 1))
+                ]   # neighbor_ids即为Local Frames, 局部帧
+            else:
+                # 输入的时间维度T保持一致
+                if (f - neighbor_stride > 0) and (f + neighbor_stride + 1 < video_length):
+                    # 视频首尾均不会越界，不需要补充额外帧
+                    neighbor_ids = [
+                        i for i in range(max(0, f - neighbor_stride),
+                                         min(video_length, f + neighbor_stride + 1))
+                    ]   # neighbor_ids即为Local Frames, 局部帧
+                else:
+                    # 视频越界，补充额外帧保证记忆缓存的时间通道维度一致，后面也可以尝试放到trans里直接复制特征的时间维度
+                    neighbor_ids = [
+                        i for i in range(max(0, f - neighbor_stride),
+                                         min(video_length, f + neighbor_stride + 1))
+                    ]  # neighbor_ids即为Local Frames, 局部帧
+                    repeat_num = (neighbor_stride * 2 + 1) - len(neighbor_ids)
+                    for ii in range(0, repeat_num):
+                        # 复制最后一帧
+                        neighbor_ids.append(neighbor_ids[-1])
+
+            if not args.memory:
+                # default test set, 局部帧与非局部帧不会输入同样id的帧
+                ref_ids = get_ref_index(neighbor_ids, video_length)  # ref_ids即为Non-Local Frames, 非局部帧
+
+                selected_imgs = frames[:1, neighbor_ids + ref_ids, :, :, :]
+                selected_masks = masks[:1, neighbor_ids + ref_ids, :, :, :]
+            else:
+                # 为了保证时间维度一致, 允许输入相同id的帧
+                ref_ids = get_ref_index_mem(video_length)  # ref_ids即为Non-Local Frames, 非局部帧
+
+                selected_imgs_lf = frames[:1, neighbor_ids, :, :, :]
+                selected_imgs_nlf = frames[:1, ref_ids, :, :, :]
+                selected_imgs = torch.cat((selected_imgs_lf, selected_imgs_nlf), dim=1)
+                selected_masks_lf = masks[:1, neighbor_ids, :, :, :]
+                selected_masks_nlf = masks[:1, ref_ids, :, :, :]
+                selected_masks = torch.cat((selected_masks_lf, selected_masks_nlf), dim=1)
+
             with torch.no_grad():
                 masked_frames = selected_imgs * (1 - selected_masks)
 
                 if args.timing:
                     torch.cuda.synchronize()
                     time_start = time.time()
-                pred_img, _ = model(masked_frames, len(neighbor_ids))
+                pred_img, _ = model(masked_frames, len(neighbor_ids))   # forward里会输入局部帧数量来对两种数据分开处理
                 if args.timing:
                     torch.cuda.synchronize()
                     time_end = time.time()
                     time_sum = time_end - time_start
-                    print('Run Time: '
-                          f'{time_sum/len(neighbor_ids)}')
+                    time_all += time_sum
+                    # print('Run Time: '
+                    #       f'{time_sum/len(neighbor_ids)}')
 
                 pred_img = (pred_img + 1) / 2
                 pred_img = pred_img.cpu().permute(0, 2, 3, 1).numpy() * 255
@@ -178,6 +237,9 @@ def main_worker(args):
             f'[{index+1:3}/{len(test_loader)}] Name: {str(video_name):25} | PSNR/SSIM: {cur_psnr:.4f}/{cur_ssim:.4f}\n'
         )
 
+        if args.timing:
+            print('Average run time: (%f) per frame' % (time_all/len_all))
+
         # saving images for evaluating warpping errors
         if args.save_results:
             save_frame_path = os.path.join(result_path, video_name[0])
@@ -200,6 +262,9 @@ def main_worker(args):
         f'{avg_frame_psnr:.2f}/{avg_frame_ssim:.4f}/{fid_score:.3f}')
     eval_summary.close()
 
+    if args.timing:
+        print('All average forward run time: (%f) per frame' % (time_all / len_all))
+
     return len(total_frame_psnr)
 
 
@@ -216,24 +281,25 @@ if __name__ == '__main__':
     parser.add_argument('--timing', action='store_true', default=False)
     parser.add_argument('--profile', action='store_true', default=False)
     parser.add_argument('--good_fusion', action='store_true', default=False, help='using my fusion strategy')
+    parser.add_argument('--memory', action='store_true', default=False, help='test with memory ability')
     args = parser.parse_args()
 
     if args.profile:
         profile = line_profiler.LineProfiler(main_worker)  # 把函数传递到性能分析器
         profile.enable()  # 开始分析
 
-    if args.timing:
-        torch.cuda.synchronize()
-        time_start = time.time()
+    # if args.timing:
+    #     torch.cuda.synchronize()
+    #     time_start = time.time()
 
     frame_num = main_worker(args)
 
-    if args.timing:
-        torch.cuda.synchronize()
-        time_end = time.time()
-        time_sum = time_end - time_start
-        print('Finish evaluation... Average Run Time: '
-              f'{time_sum/frame_num}')
+    # if args.timing:
+    #     torch.cuda.synchronize()
+    #     time_end = time.time()
+    #     time_sum = time_end - time_start
+    #     print('Finish evaluation... Average Run Time: '
+    #           f'{time_sum/frame_num}')
 
     if args.profile:
         profile.disable()  # 停止分析
