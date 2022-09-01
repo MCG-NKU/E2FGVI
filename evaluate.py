@@ -5,6 +5,7 @@ import importlib
 import sys
 import os
 import time
+import random
 import argparse
 import line_profiler
 from PIL import Image
@@ -38,6 +39,14 @@ def get_ref_index_mem(length):
     ref_index = []
     for i in range(0, length, ref_length):
         ref_index.append(i)
+    return ref_index
+
+
+# sample reference frames from the remain frames with random behavior like trainning
+def get_ref_index_mem_random(neighbor_ids, video_length, num_ref_frame=3):
+    complete_idx_set = list(range(video_length))
+    remain_idx = list(set(complete_idx_set) - set(neighbor_ids))
+    ref_index = sorted(random.sample(remain_idx, num_ref_frame))
     return ref_index
 
 
@@ -116,23 +125,36 @@ def main_worker(args):
                                      min(video_length, f + neighbor_stride + 1))
                 ]   # neighbor_ids即为Local Frames, 局部帧
             else:
-                # 输入的时间维度T保持一致
-                if (f - neighbor_stride > 0) and (f + neighbor_stride + 1 < video_length):
-                    # 视频首尾均不会越界，不需要补充额外帧
+                # 注释部分是尽可能与e2fgvi的原测试逻辑一致
+                # # 输入的时间维度T保持一致
+                # if (f - neighbor_stride > 0) and (f + neighbor_stride + 1 < video_length):
+                #     # 视频首尾均不会越界，不需要补充额外帧
+                #     neighbor_ids = [
+                #         i for i in range(max(0, f - neighbor_stride),
+                #                          min(video_length, f + neighbor_stride + 1))
+                #     ]   # neighbor_ids即为Local Frames, 局部帧
+                # else:
+                #     # 视频越界，补充额外帧保证记忆缓存的时间通道维度一致，后面也可以尝试放到trans里直接复制特征的时间维度
+                #     neighbor_ids = [
+                #         i for i in range(max(0, f - neighbor_stride),
+                #                          min(video_length, f + neighbor_stride + 1))
+                #     ]  # neighbor_ids即为Local Frames, 局部帧
+                #     repeat_num = (neighbor_stride * 2 + 1) - len(neighbor_ids)
+                #     for ii in range(0, repeat_num):
+                #         # 复制最后一帧
+                #         neighbor_ids.append(neighbor_ids[-1])
+
+                # 与记忆力模型的训练逻辑一致
+                if video_length < (f + neighbor_stride):
                     neighbor_ids = [
-                        i for i in range(max(0, f - neighbor_stride),
-                                         min(video_length, f + neighbor_stride + 1))
-                    ]   # neighbor_ids即为Local Frames, 局部帧
-                else:
-                    # 视频越界，补充额外帧保证记忆缓存的时间通道维度一致，后面也可以尝试放到trans里直接复制特征的时间维度
-                    neighbor_ids = [
-                        i for i in range(max(0, f - neighbor_stride),
-                                         min(video_length, f + neighbor_stride + 1))
-                    ]  # neighbor_ids即为Local Frames, 局部帧
-                    repeat_num = (neighbor_stride * 2 + 1) - len(neighbor_ids)
-                    for ii in range(0, repeat_num):
-                        # 复制最后一帧
+                        i for i in range(f, video_length)
+                    ]   # 时间上不重叠的窗口，每个局部帧只会被计算一次，视频尾部可能不足5帧局部帧，复制最后一帧补全数量
+                    for repeat_idx in range(0, neighbor_stride-len(neighbor_ids)):
                         neighbor_ids.append(neighbor_ids[-1])
+                else:
+                    neighbor_ids = [
+                        i for i in range(f, f + neighbor_stride)
+                    ]   # 时间上不重叠的窗口，每个局部帧只会被计算一次
 
             if not args.memory:
                 # default test set, 局部帧与非局部帧不会输入同样id的帧
@@ -142,7 +164,8 @@ def main_worker(args):
                 selected_masks = masks[:1, neighbor_ids + ref_ids, :, :, :]
             else:
                 # 为了保证时间维度一致, 允许输入相同id的帧
-                ref_ids = get_ref_index_mem(video_length)  # ref_ids即为Non-Local Frames, 非局部帧
+                # ref_ids = get_ref_index_mem(video_length)  # ref_ids即为Non-Local Frames, 非局部帧
+                ref_ids = get_ref_index_mem_random(neighbor_ids, video_length, num_ref_frame=3)     # 与训练同样的非局部帧输入逻辑
 
                 selected_imgs_lf = frames[:1, neighbor_ids, :, :, :]
                 selected_imgs_nlf = frames[:1, ref_ids, :, :, :]
