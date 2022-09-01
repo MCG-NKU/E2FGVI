@@ -27,10 +27,11 @@
         "fusion_skip_connect": 0,
         "memory": 1,
         "max_mem_len": 8,
-        "compression_factor": 2,
+        "compression_factor": 4,
         "mem_pool": 0,
-        "store_lf": 0,
-        "align_cache": 0
+        "store_lf": 1,
+        "align_cache": 1,
+        "sub_token_align": 4
     },
     "trainer": {
         "type": "Adam",

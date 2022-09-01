@@ -609,7 +609,7 @@ class WindowAttentionMem(nn.Module):
     """
     def __init__(self, dim, expand_size, window_size, focal_window,
                  focal_level, num_heads, qkv_bias, pool_method,
-                 memory, max_mem_len, compression_factor, mem_pool, store_lf, align_cache):
+                 memory, max_mem_len, compression_factor, mem_pool, store_lf, align_cache, sub_token_align, sub_factor):
 
         super().__init__()
         self.dim = dim
@@ -626,6 +626,7 @@ class WindowAttentionMem(nn.Module):
         self.mem_pool = mem_pool
         self.store_lf = store_lf
         self.align_cache = align_cache
+        self.sub_token_align = sub_token_align
 
         if any(i > 0 for i in self.expand_size) and focal_level > 0:
             # get mask for rolled k and rolled v
@@ -739,7 +740,14 @@ class WindowAttentionMem(nn.Module):
 
             if self.align_cache:
                 # 使用光流对齐缓存
-                self.flow_head = FlowHead(input_dim=(dim + dim // self.compression_factor), hidden_factor=2)
+                if not self.sub_token_align:
+                    self.flow_head = FlowHead(input_dim=(dim + dim // self.compression_factor), hidden_factor=2)
+                else:
+                    self.sub_factor = sub_factor
+                    self.flow_head = FlowHead(
+                        input_dim=(dim // self.sub_factor + (dim // self.compression_factor) // self.sub_factor),
+                        hidden_factor=2)
+
                 # 缓存对齐的记忆张量防止两次backward错误
                 self.m_k_aligned = []  # 缓存的已对齐memory keys
                 self.m_v_aligned = []  # 缓存的已对齐memory keys
@@ -828,40 +836,121 @@ class WindowAttentionMem(nn.Module):
                         k_lf = k_lf.reshape(B * l_t, C, nH, nW)                             # B*Lt, C, nH, nW
                         v_lf = v_lf.reshape(B * l_t, C, nH, nW)                             # B*Lt, C, nH, nW
 
-                        token_flow_k = self.flow_head(torch.cat((cm_k, k_lf), dim=1)).reshape(B*l_t, nH, nW, 2)
-                        token_flow_v = self.flow_head(torch.cat((cm_v, v_lf), dim=1)).reshape(B * l_t, nH, nW, 2)
+                        if not self.sub_token_align:
+                            # 在token尺度估计光流完成对齐
+                            token_flow_k = self.flow_head(torch.cat((cm_k, k_lf), dim=1)).reshape(B * l_t, nH, nW, 2)
+                            token_flow_v = self.flow_head(torch.cat((cm_v, v_lf), dim=1)).reshape(B * l_t, nH, nW, 2)
 
-                        cm_k = flow_warp(cm_k, token_flow_k)                                # B*Lt, C, nH, nW
-                        cm_v = flow_warp(cm_v, token_flow_v)                                # B*Lt, C, nH, nW
-                        cm_k = cm_k.reshape(B, l_t, nH, nW, C // self.compression_factor)
-                        cm_v = cm_v.reshape(B, l_t, nH, nW, C // self.compression_factor)
+                            cm_k = flow_warp(cm_k, token_flow_k)                             # B*Lt, C_compress, nH, nW
+                            cm_v = flow_warp(cm_v, token_flow_v)                             # B*Lt, C_compress, nH, nW
+
+                            cm_k = cm_k.reshape(B, l_t, nH, nW, C // self.compression_factor)
+                            cm_v = cm_v.reshape(B, l_t, nH, nW, C // self.compression_factor)
+                        else:
+                            # 在sub-token尺度估计光流完成对齐
+                            group_stride = C // self.sub_factor
+                            group_stride_compressed = group_stride // self.compression_factor
+                            cm_kk_list = []  # 防止两次梯度反串报错
+                            cm_vv_list = []
+                            # kk_lf_list = []  # 存储sub-token的kk_lf加快速度
+                            for group_idx in range(0, self.sub_factor):
+                                # 取出当前group的sub-token
+                                cm_kk = cm_k[:,
+                                        group_stride_compressed * group_idx:group_stride_compressed * (group_idx + 1),
+                                        :, :]
+                                cm_vv = cm_v[:,
+                                        group_stride_compressed * group_idx:group_stride_compressed * (group_idx + 1),
+                                        :, :]
+                                kk_lf = k_lf[:, group_stride * group_idx:group_stride * (group_idx + 1), :, :]
+                                vv_lf = v_lf[:, group_stride * group_idx:group_stride * (group_idx + 1), :, :]
+
+                                # sub-token尺度的光流估计
+                                token_flow_kk = self.flow_head(torch.cat((cm_kk, kk_lf), dim=1))\
+                                    .reshape(B * l_t, nH, nW, 2)
+                                token_flow_vv = self.flow_head(torch.cat((cm_vv, vv_lf), dim=1))\
+                                    .reshape(B * l_t, nH, nW, 2)
+
+                                # sub-token尺度的光流warp对齐
+                                cm_kk = flow_warp(cm_kk, token_flow_kk)     # B*Lt, C_compress/sub_factor, nH, nW
+                                cm_vv = flow_warp(cm_vv, token_flow_vv)     # B*Lt, C_compress/sub_factor, nH, nW
+                                cm_kk_list.append(cm_kk)
+                                cm_vv_list.append(cm_vv)
+
+                            # 重组回完整的cm_kk_align, 作用相当于cm_k
+                            cm_kk_align = torch.cat(cm_kk_list, dim=1).reshape(B, l_t, nH, nW, C // self.compression_factor)
+                            cm_vv_align = torch.cat(cm_vv_list, dim=1).reshape(B, l_t, nH, nW, C // self.compression_factor)
 
                         # 对齐缓存里的其他帧，注意因为缓存里的最后一次迭代还没被压缩，所以不需要对齐，上面的就是对齐最后一次迭代的流程
                         self.m_k_aligned = []   # 对齐的长度会比不对齐的list长度少1
                         self.m_v_aligned = []   # 之所以新创建list是为了防止2次梯度反传报错，如果使用retain graph会导致显存消耗增加
-                        for cache_index in range(0, len(self.m_k)-1):
-                            k_mem = self.m_k[cache_index]
-                            v_mem = self.m_v[cache_index]
-                            k_mem = k_mem.reshape(B * l_t, C // self.compression_factor, nH,
-                                                  nW)  # B*Lt, C_compress, nH, nW
-                            v_mem = v_mem.reshape(B * l_t, C // self.compression_factor, nH,
-                                                  nW)  # B*Lt, C_compress, nH, nW
 
-                            # calc token flow
-                            token_flow_k = self.flow_head(torch.cat((k_mem, k_lf), dim=1)).reshape(B * l_t, nH, nW, 2)
-                            token_flow_v = self.flow_head(torch.cat((v_mem, v_lf), dim=1)).reshape(B * l_t, nH, nW, 2)
+                        if not self.sub_token_align:
+                            # 在token尺度对齐缓存里的所有帧
+                            for cache_index in range(0, len(self.m_k)-1):
+                                k_mem = self.m_k[cache_index]
+                                v_mem = self.m_v[cache_index]
+                                k_mem = k_mem.reshape(B * l_t, C // self.compression_factor, nH,
+                                                      nW)  # B*Lt, C_compress, nH, nW
+                                v_mem = v_mem.reshape(B * l_t, C // self.compression_factor, nH,
+                                                      nW)  # B*Lt, C_compress, nH, nW
 
-                            # warp tokens
-                            k_mem = flow_warp(k_mem, token_flow_k)  # B*Lt, C, nH, nW
-                            v_mem = flow_warp(v_mem, token_flow_v)  # B*Lt, C, nH, nW
+                                # calc token flow
+                                token_flow_k = self.flow_head(torch.cat((k_mem, k_lf), dim=1)).reshape(B * l_t, nH, nW, 2)
+                                token_flow_v = self.flow_head(torch.cat((v_mem, v_lf), dim=1)).reshape(B * l_t, nH, nW, 2)
 
-                            # retrieve
-                            k_mem = k_mem.reshape(B, l_t, nH, nW, C // self.compression_factor)
-                            v_mem = v_mem.reshape(B, l_t, nH, nW, C // self.compression_factor)
-                            # self.m_k[cache_index] = k_mem
-                            # self.m_v[cache_index] = v_mem
-                            self.m_k_aligned.append(k_mem)
-                            self.m_v_aligned.append(v_mem)
+                                # warp tokens
+                                k_mem = flow_warp(k_mem, token_flow_k)  # B*Lt, C, nH, nW
+                                v_mem = flow_warp(v_mem, token_flow_v)  # B*Lt, C, nH, nW
+
+                                # retrieve
+                                k_mem = k_mem.reshape(B, l_t, nH, nW, C // self.compression_factor)
+                                v_mem = v_mem.reshape(B, l_t, nH, nW, C // self.compression_factor)
+                                self.m_k_aligned.append(k_mem)
+                                self.m_v_aligned.append(v_mem)
+                        else:
+                            # 在sub-token尺度对齐缓存里的所有帧
+                            for cache_index in range(0, len(self.m_k) - 1):
+                                k_mem = self.m_k[cache_index]
+                                v_mem = self.m_v[cache_index]
+                                k_mem = k_mem.reshape(B * l_t, C // self.compression_factor, nH,
+                                                      nW)  # B*Lt, C_compress, nH, nW
+                                v_mem = v_mem.reshape(B * l_t, C // self.compression_factor, nH,
+                                                      nW)  # B*Lt, C_compress, nH, nW
+
+                                kk_mem_list = []  # 防止两次梯度反传报错
+                                vv_mem_list = []
+                                for group_idx in range(0, self.sub_factor):
+                                    # 取出当前group的sub-token
+                                    kk_mem = k_mem[:,
+                                             group_stride_compressed * group_idx:group_stride_compressed * (
+                                                     group_idx + 1),
+                                             :, :]
+                                    vv_mem = v_mem[:,
+                                             group_stride_compressed * group_idx:group_stride_compressed * (
+                                                     group_idx + 1),
+                                             :, :]
+                                    kk_lf = k_lf[:, group_stride * group_idx:group_stride * (group_idx + 1), :, :]
+                                    vv_lf = v_lf[:, group_stride * group_idx:group_stride * (group_idx + 1), :, :]
+
+                                    # sub-token尺度的光流估计
+                                    token_flow_kk = self.flow_head(torch.cat((kk_mem, kk_lf), dim=1)) \
+                                        .reshape(B * l_t, nH, nW, 2)
+                                    token_flow_vv = self.flow_head(torch.cat((vv_mem, vv_lf), dim=1)) \
+                                        .reshape(B * l_t, nH, nW, 2)
+
+                                    # sub-token尺度的光流warp对齐
+                                    kk_mem = flow_warp(kk_mem, token_flow_kk)  # B*Lt, C_compress/sub_factor, nH, nW
+                                    vv_mem = flow_warp(vv_mem, token_flow_vv)  # B*Lt, C_compress/sub_factor, nH, nW
+                                    kk_mem_list.append(kk_mem)
+                                    vv_mem_list.append(vv_mem)
+
+                                # 重组回完整的k_mem, 作用相当于k_mem
+                                k_mem = torch.cat(kk_mem_list, dim=1).reshape(B, l_t, nH, nW,
+                                                                                   C // self.compression_factor)
+                                v_mem = torch.cat(vv_mem_list, dim=1).reshape(B, l_t, nH, nW,
+                                                                                   C // self.compression_factor)
+                                self.m_k_aligned.append(k_mem)
+                                self.m_v_aligned.append(v_mem)
 
                         # 恢复当前k v的shape
                         k_lf = k_lf.reshape(B, l_t, nH, nW, C)
@@ -878,20 +967,32 @@ class WindowAttentionMem(nn.Module):
                                 torch.cat(self.m_k[:-1], dim=4), cm_k, k_lf), dim=4))
                             v_lf = self.lin_v(torch.cat((
                                 torch.cat(self.m_v[:-1], dim=4), cm_v, v_lf), dim=4))
-                        else:
-                            # 把对齐的和当前iter的k v融合
+                        elif self.align_cache and not self.sub_token_align:
+                            # 在token尺度把对齐的和当前iter的k v融合
                             k_lf = self.lin_k(torch.cat((
                                 torch.cat(self.m_k_aligned[:], dim=4), cm_k, k_lf), dim=4))
                             v_lf = self.lin_v(torch.cat((
                                 torch.cat(self.m_v_aligned[:], dim=4), cm_v, v_lf), dim=4))
+                        else:
+                            # 在sub-token尺度把对齐的和当前iter的k v融合
+                            k_lf = self.lin_k(torch.cat((
+                                torch.cat(self.m_k_aligned[:], dim=4), cm_kk_align, k_lf), dim=4))
+                            v_lf = self.lin_v(torch.cat((
+                                torch.cat(self.m_v_aligned[:], dim=4), cm_vv_align, v_lf), dim=4))
                     else:
                         # 缓存还没有存满，需要复制当前帧的张量
                         repeat_k = self.max_len - len(self.m_k)
                         repeat_v = self.max_len - len(self.m_v)
                         if len(self.m_k) == 0:
                             # 缓存里啥也没有，直接把当前的全复制了
-                            k_lf = self.lin_k(torch.cat((cm_k.repeat(1, 1, 1, 1, repeat_k), k_lf), dim=4))
-                            v_lf = self.lin_v(torch.cat((cm_v.repeat(1, 1, 1, 1, repeat_v), v_lf), dim=4))
+                            if not self.sub_token_align:
+                                # 使用未对齐的或者token尺度对齐的cm_k
+                                k_lf = self.lin_k(torch.cat((cm_k.repeat(1, 1, 1, 1, repeat_k), k_lf), dim=4))
+                                v_lf = self.lin_v(torch.cat((cm_v.repeat(1, 1, 1, 1, repeat_v), v_lf), dim=4))
+                            else:
+                                # 使用对齐的sub-token级别cm_kk_align
+                                k_lf = self.lin_k(torch.cat((cm_kk_align.repeat(1, 1, 1, 1, repeat_k), k_lf), dim=4))
+                                v_lf = self.lin_v(torch.cat((cm_vv_align.repeat(1, 1, 1, 1, repeat_v), v_lf), dim=4))
                         else:
                             # 尽量使用缓存中的帧，不够的使用当前帧提取的代替
                             k_rep_feat = self.f_k(k_lf)
@@ -904,12 +1005,18 @@ class WindowAttentionMem(nn.Module):
                                     torch.cat(self.m_k[:-1], dim=4), cm_k, k_rep_feat, k_lf), dim=4))
                                 v_lf = self.lin_v(torch.cat((
                                     torch.cat(self.m_v[:-1], dim=4), cm_v, v_rep_feat, v_lf), dim=4))
-                            else:
-                                # 把对齐的和当前iter的k v融合
+                            elif not self.sub_token_align:
+                                # 把token级别对齐的和当前iter的k v融合
                                 k_lf = self.lin_k(torch.cat((
                                     torch.cat(self.m_k_aligned[:], dim=4), cm_k, k_rep_feat, k_lf), dim=4))
                                 v_lf = self.lin_v(torch.cat((
                                     torch.cat(self.m_v_aligned[:], dim=4), cm_v, v_rep_feat, v_lf), dim=4))
+                            else:
+                                # 把sub-token级别对齐的和当前iter的k v融合
+                                k_lf = self.lin_k(torch.cat((
+                                    torch.cat(self.m_k_aligned[:], dim=4), cm_kk_align, k_rep_feat, k_lf), dim=4))
+                                v_lf = self.lin_v(torch.cat((
+                                    torch.cat(self.m_v_aligned[:], dim=4), cm_vv_align, v_rep_feat, v_lf), dim=4))
 
                     # 把增强后的局部帧qkv还原到所有的qkv中
                     q[:, :l_t, ...] = q_lf
@@ -1125,13 +1232,24 @@ class WindowAttentionMem(nn.Module):
         # memory ability
         if self.memory:
             # 缓存更新过的记忆张量
-            try:
-                self.m_k[-1] = cm_k.detach()
-                self.m_v[-1] = cm_v.detach()
-            except:
-                # 第一帧的时候记忆张量list为空，需要保证list除了最后一个元素，其他元素都是压缩过的
-                self.m_k.append(cm_k.detach())
-                self.m_v.append(cm_v.detach())
+            if not self.sub_token_align:
+                # 存储没对齐或者token级别对齐的记忆
+                try:
+                    self.m_k[-1] = cm_k.detach()
+                    self.m_v[-1] = cm_v.detach()
+                except:
+                    # 第一帧的时候记忆张量list为空，需要保证list除了最后一个元素，其他元素都是压缩过的
+                    self.m_k.append(cm_k.detach())
+                    self.m_v.append(cm_v.detach())
+            else:
+                # 存储sub-token级别对齐的记忆
+                try:
+                    self.m_k[-1] = cm_kk_align.detach()
+                    self.m_v[-1] = cm_vv_align.detach()
+                except:
+                    # 第一帧的时候记忆张量list为空，需要保证list除了最后一个元素，其他元素都是压缩过的
+                    self.m_k.append(cm_kk_align.detach())
+                    self.m_v.append(cm_vv_align.detach())
 
             # 缓存当前时刻还没被压缩过的记忆张量，会在下一个时刻被压缩
             if not self.store_lf:
@@ -1180,6 +1298,8 @@ class TemporalFocalTransformerBlock(nn.Module):
         store_lf (bool): If True, only local frames will be cached in the memory. Only work with mem_pool=False.
         align_cache (bool): If True, memory cache will be aligned to current frames before fusion.
                             Only work with mem_pool=False and store_lf=True.
+        sub_token_align (bool): If True, memory cache will be aligned at sub-token resolution.
+        sub_factor (int): How many groups of sub-token alignment.
     """
     def __init__(self,
                  dim,
@@ -1199,7 +1319,9 @@ class TemporalFocalTransformerBlock(nn.Module):
                  compression_factor=4,
                  mem_pool=False,
                  store_lf=False,
-                 align_cache=False):
+                 align_cache=False,
+                 sub_token_align=False,
+                 sub_factor=1):
         super().__init__()
         self.dim = dim
         self.num_heads = num_heads
@@ -1253,7 +1375,9 @@ class TemporalFocalTransformerBlock(nn.Module):
                                            compression_factor=compression_factor,
                                            mem_pool=mem_pool,
                                            store_lf=store_lf,
-                                           align_cache=align_cache)
+                                           align_cache=align_cache,
+                                           sub_token_align=sub_token_align,
+                                           sub_factor=sub_factor)
 
         self.norm2 = norm_layer(dim)
         self.mlp = FusionFeedForward(dim, n_vecs=n_vecs, t2t_params=t2t_params)
