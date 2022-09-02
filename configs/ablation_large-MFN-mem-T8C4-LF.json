@@ -30,8 +30,9 @@
         "compression_factor": 4,
         "mem_pool": 0,
         "store_lf": 1,
-        "align_cache": 1,
-        "sub_token_align": 0
+        "align_cache": 0,
+        "sub_token_align": 0,
+        "half_memory": 0
     },
     "trainer": {
         "type": "Adam",

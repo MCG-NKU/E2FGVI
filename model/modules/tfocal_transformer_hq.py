@@ -1384,9 +1384,9 @@ class TemporalFocalTransformerBlock(nn.Module):
 
     def forward(self, x):
 
-        if self.memory:
-            # 记忆力需要额外传入局部帧的时间长度
-            l_t = x[2]
+        # if self.memory:
+        #     # 记忆力需要额外传入局部帧的时间长度
+        l_t = x[2]
 
         output_size = x[1]
         x = x[0]
@@ -1470,9 +1470,9 @@ class TemporalFocalTransformerBlock(nn.Module):
             x = x + self.mlp(y.view(B, T * H * W, C), (H * 3, W * 3)).view(
                 B, T, H, W, C)
 
-        if self.memory:
-            # 记忆力需要额外传入局部帧的时间长度
-            return x, output_size, l_t
-        else:
-            # default
-            return x, output_size
+        # if self.memory:
+        #     # 记忆力需要额外传入局部帧的时间长度
+        return x, output_size, l_t
+        # else:
+        #     # default
+        #     return x, output_size

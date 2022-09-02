@@ -270,7 +270,8 @@ class InpaintGenerator(BaseNetwork):
 
         # content hallucination through stacking multiple temporal focal transformer blocks
         trans_feat = self.ss(enc_feat.view(-1, c, h, w), b, fold_output_size)
-        trans_feat = self.transformer([trans_feat, fold_output_size])
+        # trans_feat = self.transformer([trans_feat, fold_output_size])     # default
+        trans_feat = self.transformer([trans_feat, fold_output_size, l_t])  # 比默认行为多传一个lt, 不影响精度
         trans_feat = self.sc(trans_feat[0], t, fold_output_size)
         trans_feat = trans_feat.view(b, t, -1, h, w)
         enc_feat = enc_feat + trans_feat

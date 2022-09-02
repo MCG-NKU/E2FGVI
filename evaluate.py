@@ -99,8 +99,11 @@ def main_worker(args):
         if args.memory:
             # 进入新的视频时清空记忆缓存
             for blk in model.transformer:
-                blk.attn.m_k = []
-                blk.attn.m_v = []
+                try:
+                    blk.attn.m_k = []
+                    blk.attn.m_v = []
+                except:
+                    pass
 
         frames, masks, video_name, frames_PIL = items
 

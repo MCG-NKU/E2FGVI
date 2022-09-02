@@ -282,7 +282,8 @@ All average forward run time: (0.026284) per frame
 测试记忆8压缩2的lite-MFN两次序列推理精度 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.86/0.9393/0.231
 All average forward run time: (0.054089) per frame
 
-测试记忆4压缩4的lite-MFN两次序列推理精度 [250k, davis]
+测试记忆4压缩4的lite-MFN两次序列推理精度 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.44/0.9356/0.239
+All average forward run time: (0.050170) per frame
 
 
 
@@ -364,6 +365,12 @@ python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --good
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T8C4-align-sub4.json
 python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --good_fusion --timing --memory
 
-# 训练记忆时长8压缩指数4只存储局部帧的大模型large-MFN测试记忆力机制以及目前的改动对于大模型是否有效 [未开始]
-CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T8C4-LF-align.json
+# 训练记忆时长8压缩指数4只存储局部帧的大模型large-MFN测试记忆力机制以及目前的改动对于大模型是否有效 [本地3090] 约需要85h
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T8C4-LF.json
 本地3090爆显存
+如果取消对齐行为则不会爆显存
+对齐操作这么吃资源？
+拆掉dcn看看：拆掉dcn也会爆显存
+如果只有一半的层有记忆力呢？能跑起来，但是7次以后会卡住，每次迭代非常非常慢
+暂时放弃缓存对齐机制，只测试光流改动以及记忆力改动的有效性
+
