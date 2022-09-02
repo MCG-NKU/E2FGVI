@@ -20,6 +20,7 @@ datasets/
 release_model/E2FGVI-CVPR22.pth
 
 CUDA_VISIBLE_DEVICES=1 python evaluate.py --model e2fgvi --dataset davis --data_root datasets/ --timing --ckpt release_model/E2FGVI-CVPR22.pth
+All average forward run time: (0.073828) per frame [矩池云3090]
 
 # 改进中间帧融合策略0.5，psnr提升0.1
 --model
@@ -192,9 +193,101 @@ lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减8 记忆时长16 显存消耗
 lite-MFN 原E2FGVI大小 bs2 记忆力 通道缩减8 记忆时长32 显存消耗: 22.95GB 22.90GB
 ----
 
+######################################↓↓↓修改测试逻辑↓↓↓###########################################################
 # 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4 [已完成] 约需要46.5h
 python train.py -c configs/ablation_lite-MFN-mem-T8C4.json
+CUDA_VISIBLE_DEVICES=1 python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T8C4/gen_250000.pth --good_fusion --timing --memory
 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.71                   # PSNR提升0.10(对比无记忆力下降0.40)
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.70/0.9396/0.227      # 训练时局部/非局部记忆，在测试时只输入局部帧记忆，精度变化不大
+All average forward run time: (0.059241) per frame [矩池云3090]
+
+调整至和训练一样的输入行为进行测试：局部帧的输入方式相同 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.87/0.9386/0.236
+All average forward run time: (0.027871) per frame [矩池云3090]
+精度相比于e2fgvi的测试逻辑提高0.16，速度快了1倍（因为每个局部帧只被计算了一次）
+
+调整至和训练一样的输入行为进行测试：局部帧和参考帧的输入方式都相同，其中参考帧输入3帧随机不重复 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.90/0.9391/0.237
+All average forward run time: (0.026051) per frame
+精度相比于e2fgvi的测试逻辑提高0.19，速度更快了（因为每个局部帧只被计算了一次并且非局部帧只输入了3帧）
+因为有随机的非局部帧采样所以再测一次 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.89/0.9390/0.237
+All average forward run time: (0.025866) per frame
+第三次测试 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.90/0.9391/0.237
+All average forward run time: (0.027414) per frame
+精度波动不大，速度很快
+
+如果测试的时候记忆只存储局部帧？[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.69/0.9367/0.249
+All average forward run time: (0.025671) per frame
+训练和测试的逻辑不一致会导致精度的下降，另外记忆非局部帧可能也可以提升精度
+
+测试相同测试逻辑下，e2fgvi-hq-lite的精度 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.18/0.9422/0.223
+All average forward run time: (0.017689) per frame
+坏了，相同的测试逻辑下e2fgvi-hq-lite的精度暴涨，速度也快了。。。
+
+相同逻辑下，序列化训练的e2fgvi-hq-lite的精度 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.10/0.9415/0.227
+All average forward run time: (0.018998) per frame
+可见序列化训练确实会让精度下降，序列化的e2fgvi-hq-lite精度下降了0.08
+
+测试相同测试逻辑下，lite-MFN的精度 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.25/0.9429/0.216
+All average forward run time: (0.026862) per frame
+相同的测试逻辑下lite-MFN的精度也提高了，速度也快了
+
+测试相同测试逻辑下，序列化训练的lite-MFN的精度 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.14/0.9418/0.225
+All average forward run time: (0.026544) per frame
+相同的测试逻辑下，序列化训练的lite-MFN精度下降了0.11
+
+测试相同逻辑下，官方的e2fgvi的精度 [500k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 31.73/0.9649/0.147
+All average forward run time: (0.039471) per frame
+相同逻辑下，官方给出的e2fgvi模型精度严重下降。。。
+
+测试相同逻辑下，官方的e2fgvi_hq的精度 [500k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 31.75/0.9652/0.140
+All average forward run time: (0.039265) per frame
+相同逻辑下，官方给出的e2fgvi-hq模型精度也严重下降。。。
+
+如果我们的记忆力模型也测试两次然后取平均值呢？[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.11/0.9411/0.224
+All average forward run time: (0.055980) per frame
+精度和lite-MFN加默认测试逻辑差不多了，比只推理1次精度提高了0.21
+也就是说，记忆力模型刷精度可以通过相同的测试逻辑，然后推理两次实现
+
+没有记忆力的模型也用序列推理两次的精度如何呢？[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.48/0.9450/0.214  # 目前最高的PSNR 29.48
+All average forward run time: (0.051158) per frame
+没有记忆力的模型用这个推理逻辑做两次平均，精度直接刷到最高29.48 。。。
+
+使用序列化训练的lite-MFN两次序列推理取平均 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.38/0.9440/0.219
+All average forward run time: (0.050378) per frame
+
+没有记忆力的模型E2FGVI-CVPR22使用序列测试输入推理两次平均 [500k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 32.30/0.9683/0.139
+All average forward run time: (0.076663) per frame
+精度不如官方的测试逻辑
+
+测试e2fgvi-bs2的baseline版本使用序列化测试的精度和速度变化 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 30.05/0.9543/0.192
+All average forward run time: (0.038831) per frame
+
+测试e2fgvi-bs2的baseline版本使用序列化测试两次平均的精度和速度 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 30.42/0.9571/0.184
+All average forward run time: (0.076268) per frame
+
+测试lite-MFN压缩指数2记忆时长8的模型使用序列化测试的精度和速度变化 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.67/0.9372/0.246
+All average forward run time: (0.025476) per frame
+精度几乎没变 速度提升很大
+
+测试lite-MFN压缩指数4记忆时长4的模型使用序列化测试的精度和速度变化 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.30/0.9340/0.256
+All average forward run time: (0.026109) per frame
+精度略微回升，速度显著提升
+
+测试lite-MFN压缩指数8记忆时长4的模型使用序列化测试的精度和速度变化 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.39/0.9365/0.248
+All average forward run time: (0.027444) per frame
+精度显著回升，压缩指数越大，对于测试和训练逻辑是否一致就越敏感
+
+测试lite-MFN压缩指数8记忆时长8的模型使用序列化测试的精度和速度变化 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.61/0.9367/0.235
+All average forward run time: (0.026284) per frame
+
+测试记忆8压缩2的lite-MFN两次序列推理精度 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.86/0.9393/0.231
+All average forward run time: (0.054089) per frame
+
+测试记忆4压缩4的lite-MFN两次序列推理精度 [250k, davis]
+
+
+
+######################################↑↑↑修改测试逻辑↑↑↑###########################################################
+
 
 # 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长4，通道缩减8 [已完成] 需要55h
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T4C8.json
@@ -206,10 +299,17 @@ All average forward run time: (0.060132) per frame [矩池云3090]
 CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_lite-MFN-mem-T8C8.json
 python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T8C8/gen_250000.pth --good_fusion --timing --memory
 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.37/0.9359/0.247      # PSNR降低0.24(对比无记忆力下降0.74)
-All average forward run time: (0.058200) per frame  [矩池云3090]
+All average forward run time: (0.058200) per frame [矩池云3090]
 
-# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减2 [tmux1] 约需要55.5h
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减2 [已完成] 需要55h
 CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_lite-MFN-mem-T8C2.json
+CUDA_VISIBLE_DEVICES=1 python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T8C2/gen_250000.pth --good_fusion --timing --memory
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.68/0.9386/0.242      # PSNR提升0.07(对比无记忆力下降0.43)
+All average forward run time: (0.061538) per frame [矩池云3090]
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.51/0.9367/0.239     # 训练时混合局部帧和非局部帧，推理时【只记忆局部帧】的精度再次发生下降
+All average forward run time: (0.054712) per frame [矩池云3090]
+精度甚至不如记忆时长8通道缩减4的模型，看来靠暴力堆叠记忆时长和记忆通道不能一直提高精度，而且目前来说，相比于没有记忆力的模型，造成了严重的精度下降
+难道是对于记忆模型的推理脚本写的有问题？ 确实有问题
 
 # 训练e2fgvi-lite来对比序列化dataloader的训练不稳定导致的精度退化 [已完成] 需要39.11h
 python train.py -c configs/ablation_e2fgvi_hq-lite-seq.json
@@ -230,16 +330,40 @@ python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --ckpt
 All average forward run time: (0.070436) per frame [本地3090Ti]
 序列化训练并没有影响e2fgvi-lite和lite-MFN的精度
 
-# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4，记忆缓存只存储局部帧，防止随机的非局部帧干扰模式学习 [tmux0] 约需要h
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4，记忆缓存只存储局部帧，防止随机的非局部帧干扰模式学习 [已完成] 需要55h
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T8C4-LF.json
 python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --good_fusion --timing --memory
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.90/0.9397/0.236
+All average forward run time: (0.025134) per frame [矩池云3090]
 
-# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4，记忆缓存只存储局部帧，在增强当前帧前对齐缓存 [3090] 约需要h
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4，记忆缓存只存储局部帧，在增强当前帧前对齐缓存 [已完成] 需要50h
 # 在压缩记忆缓存后使用光流进行token对齐，优点是可以计算缓存里每一帧与当前帧的光流并进行对齐
+# 基于序列化测试精度
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T8C4-LF-align.json
 python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --good_fusion --timing --memory
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.91/0.9405/0.220
+All average forward run time: (0.030727) per frame [本地3090]
+相比于没有使用光流对齐的，且缓存了所有帧的模型，精度回升0.01，看来缓存非局部帧也是有效的？
+猜测是没有缓存非局部帧导致精度下降，对齐缓存导致精度上升，一来一回抵消了
+只要看看没有缓存非局部帧的模型精度表现如何就知道了
 
 # 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4，记忆缓存只存储局部帧，在增强当前帧前对齐缓存 [未开始] 约需要h
 # 在压缩记忆缓存前使用光流进行token对齐，优点是上一帧到当前帧的光流计算更准确，缺点是不能对齐缓存里的其他已经压缩过的记忆(除非池化)，并且计算开销更大，最好只维持一次迭代的记忆缓存
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T8C4-LF-align_before.json
 python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --good_fusion --timing --memory
+
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4，记忆缓存只存储局部帧，在增强当前帧前对齐缓存 [3090Ti] 约需要h
+# 在压缩记忆缓存后使用光流进行token对齐，优点是可以计算缓存里每一帧与当前帧的光流并进行对齐
+# 在对齐缓存时将token从通道维度上进行分组，来实现sub-token alignment，分组系数 4；目前各个通道共用1个FlowHead；没有加入额外的位置嵌入
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T8C4-LF-align-sub4.json
+python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --good_fusion --timing --memory
+
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4，记忆缓存同时存储局部帧和非局部帧，在增强当前帧前对齐缓存 [未开始] 约需要h
+# 在压缩记忆缓存后使用光流进行token对齐，优点是可以计算缓存里每一帧与当前帧的光流并进行对齐
+# 在对齐缓存时将token从通道维度上进行分组，来实现sub-token alignment，分组系数 4；目前各个通道共用1个FlowHead；没有加入额外的位置嵌入
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T8C4-align-sub4.json
+python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --good_fusion --timing --memory
+
+# 训练记忆时长8压缩指数4只存储局部帧的大模型large-MFN测试记忆力机制以及目前的改动对于大模型是否有效 [未开始]
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T8C4-LF-align.json
+本地3090爆显存

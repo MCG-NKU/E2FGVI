@@ -78,7 +78,7 @@ class Trainer:
         else:
             self.memory = False
 
-        if config['model']['net'] == 'lite-MFN':
+        if config['model']['net'] == 'lite-MFN' or config['model']['net'] == 'large-MFN':
 
             if config['model']['skip_dcn'] != 0:
                 self.skip_dcn = True
