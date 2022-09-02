@@ -226,6 +226,117 @@ def main_worker(args):
                                 np.float32) * 0.5 + img.astype(np.float32) * 0.5
                         ########################################################################################
 
+        if args.memory_double:
+            for f in range(neighbor_stride//2, video_length, neighbor_stride):
+                if not args.memory:
+                    # default id with different T
+                    neighbor_ids = [
+                        i for i in range(max(neighbor_stride//2, f - neighbor_stride),
+                                         min(video_length, f + neighbor_stride + 1))
+                    ]  # neighbor_ids即为Local Frames, 局部帧
+                else:
+                    # 注释部分是尽可能与e2fgvi的原测试逻辑一致
+                    # # 输入的时间维度T保持一致
+                    # if (f - neighbor_stride > 0) and (f + neighbor_stride + 1 < video_length):
+                    #     # 视频首尾均不会越界，不需要补充额外帧
+                    #     neighbor_ids = [
+                    #         i for i in range(max(0, f - neighbor_stride),
+                    #                          min(video_length, f + neighbor_stride + 1))
+                    #     ]   # neighbor_ids即为Local Frames, 局部帧
+                    # else:
+                    #     # 视频越界，补充额外帧保证记忆缓存的时间通道维度一致，后面也可以尝试放到trans里直接复制特征的时间维度
+                    #     neighbor_ids = [
+                    #         i for i in range(max(0, f - neighbor_stride),
+                    #                          min(video_length, f + neighbor_stride + 1))
+                    #     ]  # neighbor_ids即为Local Frames, 局部帧
+                    #     repeat_num = (neighbor_stride * 2 + 1) - len(neighbor_ids)
+                    #     for ii in range(0, repeat_num):
+                    #         # 复制最后一帧
+                    #         neighbor_ids.append(neighbor_ids[-1])
+
+                    # 与记忆力模型的训练逻辑一致
+                    if video_length < (f + neighbor_stride):
+                        neighbor_ids = [
+                            i for i in range(f, video_length)
+                        ]  # 时间上不重叠的窗口，每个局部帧只会被计算一次，视频尾部可能不足5帧局部帧，复制最后一帧补全数量
+                        for repeat_idx in range(0, neighbor_stride - len(neighbor_ids)):
+                            neighbor_ids.append(neighbor_ids[-1])
+                    else:
+                        neighbor_ids = [
+                            i for i in range(f, f + neighbor_stride)
+                        ]  # 时间上不重叠的窗口，每个局部帧只会被计算一次
+
+                if not args.memory:
+                    # default test set, 局部帧与非局部帧不会输入同样id的帧
+                    ref_ids = get_ref_index(neighbor_ids, video_length)  # ref_ids即为Non-Local Frames, 非局部帧
+
+                    selected_imgs = frames[:1, neighbor_ids + ref_ids, :, :, :]
+                    selected_masks = masks[:1, neighbor_ids + ref_ids, :, :, :]
+                else:
+                    # 为了保证时间维度一致, 允许输入相同id的帧
+                    # ref_ids = get_ref_index_mem(video_length)  # ref_ids即为Non-Local Frames, 非局部帧
+                    ref_ids = get_ref_index_mem_random(neighbor_ids, video_length, num_ref_frame=3)  # 与训练同样的非局部帧输入逻辑
+
+                    selected_imgs_lf = frames[:1, neighbor_ids, :, :, :]
+                    selected_imgs_nlf = frames[:1, ref_ids, :, :, :]
+                    selected_imgs = torch.cat((selected_imgs_lf, selected_imgs_nlf), dim=1)
+                    selected_masks_lf = masks[:1, neighbor_ids, :, :, :]
+                    selected_masks_nlf = masks[:1, ref_ids, :, :, :]
+                    selected_masks = torch.cat((selected_masks_lf, selected_masks_nlf), dim=1)
+
+                with torch.no_grad():
+                    masked_frames = selected_imgs * (1 - selected_masks)
+
+                    if args.timing:
+                        torch.cuda.synchronize()
+                        time_start = time.time()
+                    pred_img, _ = model(masked_frames, len(neighbor_ids))  # forward里会输入局部帧数量来对两种数据分开处理
+                    if args.timing:
+                        torch.cuda.synchronize()
+                        time_end = time.time()
+                        time_sum = time_end - time_start
+                        time_all += time_sum
+                        # print('Run Time: '
+                        #       f'{time_sum/len(neighbor_ids)}')
+
+                    pred_img = (pred_img + 1) / 2
+                    pred_img = pred_img.cpu().permute(0, 2, 3, 1).numpy() * 255
+                    binary_masks = masks[0, neighbor_ids, :, :, :].cpu().permute(
+                        0, 2, 3, 1).numpy().astype(np.uint8)
+                    for i in range(len(neighbor_ids)):
+                        idx = neighbor_ids[i]
+                        img = np.array(pred_img[i]).astype(np.uint8) * binary_masks[i] \
+                              + ori_frames[idx] * (1 - binary_masks[i])
+
+                        if not args.good_fusion:
+                            if comp_frames[idx] is None:
+                                # 如果第一次补全Local Frame中的某帧，直接记录到补全帧list (comp_frames) 里
+                                comp_frames[idx] = img
+
+                            else:  # default 融合策略：不合理，neighbor_stride倍数的LF的中间帧权重为0.25，应当为0.5
+                                # 如果不是第一次补全Local Frame中的某帧，即该帧已补全过，则把此前结果与当前帧结果简单加和平均
+                                comp_frames[idx] = comp_frames[idx].astype(
+                                    np.float32) * 0.5 + img.astype(np.float32) * 0.5
+                            ########################################################################################
+                        else:
+                            if comp_frames[idx] is None:
+                                # 如果第一次补全Local Frame中的某帧，直接记录到补全帧list (comp_frames) 里
+                                comp_frames[idx] = img
+
+                            elif idx == (neighbor_ids[0] + neighbor_ids[-1]) / 2:
+                                # 如果是中间帧，记录下来
+                                medium_frame = img
+                            elif (idx != 0) & (idx == neighbor_ids[0]):
+                                # 如果是第三次出现，加权平均
+                                comp_frames[idx] = comp_frames[idx].astype(
+                                    np.float32) * 0.25 + medium_frame.astype(np.float32) * 0.5 + img.astype(
+                                    np.float32) * 0.25
+                            else:
+                                # 如果是不是中间帧，权重为0.5
+                                comp_frames[idx] = comp_frames[idx].astype(
+                                    np.float32) * 0.5 + img.astype(np.float32) * 0.5
+                            ########################################################################################
+
         # calculate metrics
         cur_video_psnr = []
         cur_video_ssim = []
@@ -305,6 +416,8 @@ if __name__ == '__main__':
     parser.add_argument('--profile', action='store_true', default=False)
     parser.add_argument('--good_fusion', action='store_true', default=False, help='using my fusion strategy')
     parser.add_argument('--memory', action='store_true', default=False, help='test with memory ability')
+    # TODO: 这里的memory double逻辑还可以把前面两帧也再次估计一遍提升精度
+    parser.add_argument('--memory_double', action='store_true', default=False, help='test with memory ability twice')
     args = parser.parse_args()
 
     if args.profile:
