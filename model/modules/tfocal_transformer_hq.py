@@ -963,22 +963,37 @@ class WindowAttentionMem(nn.Module):
                         # 因为缓存里的最后一帧还没被压缩的替换，所以不取最后一帧的缓存，直接拿压缩完的cm就可
                         if not self.align_cache:
                             # 把没对齐的和当前iter的k v融合
-                            k_lf = self.lin_k(torch.cat((
-                                torch.cat(self.m_k[:-1], dim=4), cm_k, k_lf), dim=4))
-                            v_lf = self.lin_v(torch.cat((
-                                torch.cat(self.m_v[:-1], dim=4), cm_v, v_lf), dim=4))
+                            if self.max_len > 1:    # 缓存长度大于1时可以cat
+                                k_lf = self.lin_k(torch.cat((
+                                    torch.cat(self.m_k[:-1], dim=4), cm_k, k_lf), dim=4))
+                                v_lf = self.lin_v(torch.cat((
+                                    torch.cat(self.m_v[:-1], dim=4), cm_v, v_lf), dim=4))
+                            else:
+                                # 当最大记忆时长只有1次迭代时，压缩过后的最后一个记忆就是全部的记忆了
+                                k_lf = self.lin_k(torch.cat((cm_k, k_lf), dim=4))
+                                v_lf = self.lin_v(torch.cat((cm_v, v_lf), dim=4))
                         elif self.align_cache and not self.sub_token_align:
                             # 在token尺度把对齐的和当前iter的k v融合
-                            k_lf = self.lin_k(torch.cat((
-                                torch.cat(self.m_k_aligned[:], dim=4), cm_k, k_lf), dim=4))
-                            v_lf = self.lin_v(torch.cat((
-                                torch.cat(self.m_v_aligned[:], dim=4), cm_v, v_lf), dim=4))
+                            if self.max_len > 1:  # 缓存长度大于1时可以cat
+                                k_lf = self.lin_k(torch.cat((
+                                    torch.cat(self.m_k_aligned[:], dim=4), cm_k, k_lf), dim=4))
+                                v_lf = self.lin_v(torch.cat((
+                                    torch.cat(self.m_v_aligned[:], dim=4), cm_v, v_lf), dim=4))
+                            else:
+                                # 当最大记忆时长只有1次迭代时，压缩过后的最后一个记忆就是全部的记忆了
+                                k_lf = self.lin_k(torch.cat((cm_k, k_lf), dim=4))
+                                v_lf = self.lin_v(torch.cat((cm_v, v_lf), dim=4))
                         else:
                             # 在sub-token尺度把对齐的和当前iter的k v融合
-                            k_lf = self.lin_k(torch.cat((
-                                torch.cat(self.m_k_aligned[:], dim=4), cm_kk_align, k_lf), dim=4))
-                            v_lf = self.lin_v(torch.cat((
-                                torch.cat(self.m_v_aligned[:], dim=4), cm_vv_align, v_lf), dim=4))
+                            if self.max_len > 1:  # 缓存长度大于1时可以cat
+                                k_lf = self.lin_k(torch.cat((
+                                    torch.cat(self.m_k_aligned[:], dim=4), cm_kk_align, k_lf), dim=4))
+                                v_lf = self.lin_v(torch.cat((
+                                    torch.cat(self.m_v_aligned[:], dim=4), cm_vv_align, v_lf), dim=4))
+                            else:
+                                # 当最大记忆时长只有1次迭代时，压缩过后的最后一个记忆就是全部的记忆了
+                                k_lf = self.lin_k(torch.cat((cm_kk_align, k_lf), dim=4))
+                                v_lf = self.lin_v(torch.cat((cm_vv_align, v_lf), dim=4))
                     else:
                         # 缓存还没有存满，需要复制当前帧的张量
                         repeat_k = self.max_len - len(self.m_k)
