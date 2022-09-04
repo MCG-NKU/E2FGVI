@@ -285,7 +285,19 @@ All average forward run time: (0.054089) per frame
 测试记忆4压缩4的lite-MFN两次序列推理精度 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.44/0.9356/0.239
 All average forward run time: (0.050170) per frame
 
+测试T4C8的lite-MFN两次序列推理精度 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.64/0.9390/0.228
+All average forward run time: (0.050626) per frame
 
+测试T8C8的lite-MFN两次序列推理精度 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.81/0.9387/0.226
+All average forward run time: (0.053568) per frame
+
+测试T8C4缓存局部帧的lite-MFN两次序列推理精度 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.09/0.9414/0.227
+All average forward run time: (0.052377) per frame
+精度不错
+
+测试T8C4缓存局部帧，并对齐缓存的lite-MFN两次序列推理精度 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.15/0.9428/0.211
+All average forward run time: (0.058264) per frame
+对齐缓存确实把精度刷上来了。。。
 
 ######################################↑↑↑修改测试逻辑↑↑↑###########################################################
 
@@ -334,8 +346,13 @@ All average forward run time: (0.070436) per frame [本地3090Ti]
 # 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4，记忆缓存只存储局部帧，防止随机的非局部帧干扰模式学习 [已完成] 需要55h
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T8C4-LF.json
 python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --good_fusion --timing --memory
+使用序列测试
 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.90/0.9397/0.236
 All average forward run time: (0.025134) per frame [矩池云3090]
+不使用序列测试，使用半滑窗逻辑测试精度 with good fusion
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.61/0.9401/0.253
+All average forward run time: (0.062334) per frame
+不用序列测试精度下降严重，并且会明显比同时存储局部帧和非局部帧的记忆模型差
 
 # 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4，记忆缓存只存储局部帧，在增强当前帧前对齐缓存 [已完成] 需要50h
 # 在压缩记忆缓存后使用光流进行token对齐，优点是可以计算缓存里每一帧与当前帧的光流并进行对齐
@@ -347,17 +364,33 @@ All average forward run time: (0.030727) per frame [本地3090]
 相比于没有使用光流对齐的，且缓存了所有帧的模型，精度回升0.01，看来缓存非局部帧也是有效的？
 猜测是没有缓存非局部帧导致精度下降，对齐缓存导致精度上升，一来一回抵消了
 只要看看没有缓存非局部帧的模型精度表现如何就知道了
+不使用序列测试，使用半滑窗逻辑测试精度 with good fusion (使用same_memory命令实现和E2FGVI尽可能一致的测试逻辑)
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 27.96/0.9367/0.226
+All average forward run time: (0.058379) per frame
+比不对齐缓存精度下降更严重了，对于记忆机制的订制越多，对于测试逻辑就越敏感
 
 # 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4，记忆缓存只存储局部帧，在增强当前帧前对齐缓存 [未开始] 约需要h
 # 在压缩记忆缓存前使用光流进行token对齐，优点是上一帧到当前帧的光流计算更准确，缺点是不能对齐缓存里的其他已经压缩过的记忆(除非池化)，并且计算开销更大，最好只维持一次迭代的记忆缓存
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T8C4-LF-align_before.json
 python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --good_fusion --timing --memory
 
-# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4，记忆缓存只存储局部帧，在增强当前帧前对齐缓存 [3090Ti] 约需要h
+# 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4，记忆缓存只存储局部帧，在增强当前帧前对齐缓存 [已完成] 需要51.5h
 # 在压缩记忆缓存后使用光流进行token对齐，优点是可以计算缓存里每一帧与当前帧的光流并进行对齐
 # 在对齐缓存时将token从通道维度上进行分组，来实现sub-token alignment，分组系数 4；目前各个通道共用1个FlowHead；没有加入额外的位置嵌入
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T8C4-LF-align-sub4.json
 python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --good_fusion --timing --memory
+默认的半滑窗逻辑测试：
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.47/0.9394/0.232
+All average forward run time: (0.085886) per frame [3090 Ti]
+比token级别对齐精度大涨0.50！但在这个模式下精度还是比只有局部帧不对齐的差
+序列测试：
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.74/0.9387/0.221
+All average forward run time: (0.032889) per frame [3090 Ti]
+序列测试的精度没有token级别的对齐好
+序列测试x2：
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.00/0.9413/0.213
+All average forward run time: (0.068087) per frame [3090 Ti]
+序列测试x2的精度没有token级别的对齐好
 
 # 训练带有记忆力机制来增强qkv的Lite-MFN train loader是序列化的，记忆力时长8，通道缩减4，记忆缓存同时存储局部帧和非局部帧，在增强当前帧前对齐缓存 [未开始] 约需要h
 # 在压缩记忆缓存后使用光流进行token对齐，优点是可以计算缓存里每一帧与当前帧的光流并进行对齐
@@ -365,7 +398,7 @@ python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --good
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T8C4-align-sub4.json
 python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --good_fusion --timing --memory
 
-# 训练记忆时长8压缩指数4只存储局部帧的大模型large-MFN测试记忆力机制以及目前的改动对于大模型是否有效 [本地3090] 约需要85h
+# 训练记忆时长8压缩指数4只存储局部帧的大模型large-MFN测试记忆力机制以及目前的改动对于大模型是否有效 [本地3090] 约需要83.5h
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T8C4-LF.json
 本地3090爆显存
 如果取消对齐行为则不会爆显存
@@ -373,4 +406,71 @@ CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T8C4-LF
 拆掉dcn看看：拆掉dcn也会爆显存
 如果只有一半的层有记忆力呢？能跑起来，但是7次以后会卡住，每次迭代非常非常慢
 暂时放弃缓存对齐机制，只测试光流改动以及记忆力改动的有效性
+后面想加回来可以进一步减少有记忆力的层，或者进一步压缩记忆时长和通道
+flow loss用成spynet算了，停掉10k，重新开启来
 
+# 为了找到记忆模型精度下降的原因，训练记忆时长2只存储局部帧且不压缩的lite-MFN作为对比 [已完成] 需要55h
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T2C1-LF.json
+如果算力不够这个实验可以停掉，之前的实验已经证明只存储局部帧在默认推理逻辑下精度会下降
+默认的半滑窗逻辑测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T2C1-LF/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.98/0.9421/0.232
+All average forward run time: (0.057227) per frame [矩池云3090]
+精度终于接近没有记忆力的模型了！可见长时间的记忆和当前帧差异太大，是没有好处的！另外，长时间的记忆，误差也更容易累计下来。
+如果想把影响降低到最小，应该输入T1？
+只存储局部帧的模型在默认的半滑窗推理逻辑中精度最高，合理，因为默认的推理逻辑输入的非局部帧数量和采样方式变化很大。只存储局部帧会更稳定
+序列测试(good fusion)：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T2C1-LF/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --good_fusion
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.84/0.9391/0.235
+All average forward run time: (0.025474) per frame [矩池云3090]
+为什么这个模型用序列测试精度反而不涨了呢？
+序列测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T2C1-LF/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.85/0.9392/0.235
+All average forward run time: (0.025778) per frame [矩池云3090]
+序列测试x2：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T2C1-LF/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.02/0.9410/0.223
+All average forward run time: (0.051143) per frame [矩池云3090]
+精度还是不够，T2C8的模型序列推理的精度更高，应该进一步降低时序记忆时长，例如T1
+
+# 为了找到记忆模型精度下降的原因，训练记忆时长2且不压缩的lite-MFN作为对比 [已完成] 需要55h
+CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_lite-MFN-mem-T2C1.json
+默认的半滑窗逻辑测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T2C1/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.02/0.9354/0.240
+All average forward run time: (0.055743) per frame [矩池云3090]
+对比T2C1-LF，再一次坚定了我不存储非局部帧的决心
+序列测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T2C1/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.27/0.9347/0.232
+All average forward run time: (0.025356) per frame [矩池云3090]
+存储非局部帧确实没有卵用
+序列测试x2：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T2C1/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.44/0.9366/0.227
+All average forward run time: (0.050179) per frame [矩池云3090]
+对比T2C1-LF，再一次坚定了我不存储非局部帧的决心，记忆信息少的时候很明显，随机的非局部帧降低了模式学习的能力
+
+# 记忆时长只有2，压缩指数2/4/6/8会怎么样呢？都等待探索，记忆时长和压缩指数的平衡点到底在哪里？
+
+# 为了找到记忆模型精度下降的原因，训练记忆时长2且压缩8的lite-MFN作为对比 [已完成] 需要41h
+python train.py -c configs/ablation_lite-MFN-mem-T2C8.json
+默认的半滑窗逻辑测试：
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.47/0.9390/0.255
+All average forward run time: (0.075989) per frame [3090Ti]
+还是相比于不加精度下降
+序列测试：
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.93/0.9397/0.235
+All average forward run time: (0.023290) per frame [3090Ti]
+序列测试x2：
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.14/0.9417/0.221
+All average forward run time: (0.044951) per frame [3090Ti]
+虽然记忆时长很短压缩指数也很高，但是精度表现已经超过了之前最复杂的记忆模型
+综合T2C1-LF以及T2C1的模型表现来看，只存储局部帧，并且对于记忆进行进一步压缩是更好的选择，记忆时长也不宜过长，总之，应该让当前帧的结果(特征)成为主流，防止误差的累计
+
+# 为了找到记忆模型精度下降的原因，训练记忆时长1，只存储局部帧且压缩8的lite-MFN作为对比 [3090Ti] 需要h
+python train.py -c configs/ablation_lite-MFN-mem-T1C8-LF.json
+
+# 为了找到记忆模型精度下降的原因，训练记忆时长1，只存储局部帧且压缩8 token对齐 的lite-MFN作为对比 [tmux0] 需要h
+python train.py -c configs/ablation_lite-MFN-mem-T1C8-LF-align.json

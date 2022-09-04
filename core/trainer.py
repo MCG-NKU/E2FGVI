@@ -65,7 +65,7 @@ class Trainer:
         self.adversarial_loss = self.adversarial_loss.to(self.config['device'])
         self.l1_loss = nn.L1Loss()
 
-        if config['model']['net'] == 'lite-MFN':
+        if config['model']['net'] == 'lite-MFN' or config['model']['net'] == 'large-MFN':
             self.flow_comp_loss = FlowCompletionLoss(estimator='mfn').to(self.config['device'])
         else:
             self.flow_comp_loss = FlowCompletionLoss(estimator='spy').to(self.config['device'])     # default
