@@ -398,7 +398,7 @@ All average forward run time: (0.068087) per frame [3090 Ti]
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T8C4-align-sub4.json
 python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --good_fusion --timing --memory
 
-# 训练记忆时长8压缩指数4只存储局部帧的大模型large-MFN测试记忆力机制以及目前的改动对于大模型是否有效 [本地3090] 约需要83.5h
+# 训练记忆时长8压缩指数4只存储局部帧的大模型large-MFN测试记忆力机制以及目前的改动对于大模型是否有效 [本地3090暂停210k] 约需要83.5h
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T8C4-LF.json
 本地3090爆显存
 如果取消对齐行为则不会爆显存
@@ -408,6 +408,15 @@ CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T8C4-LF
 暂时放弃缓存对齐机制，只测试光流改动以及记忆力改动的有效性
 后面想加回来可以进一步减少有记忆力的层，或者进一步压缩记忆时长和通道
 flow loss用成spynet算了，停掉10k，重新开启来
+默认的半滑窗逻辑测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/large-MFN_ablation_large-MFN-mem-T8C4-LF/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory
+[250k, davis] [本地3090]
+序列测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/large-MFN_ablation_large-MFN-mem-T8C4-LF/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
+[250k, davis] [本地3090]
+序列测试x2：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/large-MFN_ablation_large-MFN-mem-T8C4-LF/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis] [本地3090]
 
 # 为了找到记忆模型精度下降的原因，训练记忆时长2只存储局部帧且不压缩的lite-MFN作为对比 [已完成] 需要55h
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T2C1-LF.json
@@ -473,4 +482,7 @@ All average forward run time: (0.044951) per frame [3090Ti]
 python train.py -c configs/ablation_lite-MFN-mem-T1C8-LF.json
 
 # 为了找到记忆模型精度下降的原因，训练记忆时长1，只存储局部帧且压缩8 token对齐 的lite-MFN作为对比 [tmux0] 需要h
-python train.py -c configs/ablation_lite-MFN-mem-T1C8-LF-align.json
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T1C8-LF-align.json
+
+# 为了找到记忆模型精度下降的原因，训练记忆时长1，只存储局部帧且压缩8 sub-token 4 对齐 的lite-MFN作为对比 [tmux1] 需要h
+CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_lite-MFN-mem-T1C8-LF-align-sub4.json
