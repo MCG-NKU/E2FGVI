@@ -398,7 +398,7 @@ All average forward run time: (0.068087) per frame [3090 Ti]
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T8C4-align-sub4.json
 python evaluate.py --model lite-MFN --dataset davis --data_root datasets/ --good_fusion --timing --memory
 
-# 训练记忆时长8压缩指数4只存储局部帧的大模型large-MFN测试记忆力机制以及目前的改动对于大模型是否有效 [本地3090暂停210k] 约需要83.5h
+# 训练记忆时长8压缩指数4只存储局部帧的大模型large-MFN测试记忆力机制以及目前的改动对于大模型是否有效 [已完成] 需要83.5h
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T8C4-LF.json
 本地3090爆显存
 如果取消对齐行为则不会爆显存
@@ -407,16 +407,22 @@ CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T8C4-LF
 如果只有一半的层有记忆力呢？能跑起来，但是7次以后会卡住，每次迭代非常非常慢
 暂时放弃缓存对齐机制，只测试光流改动以及记忆力改动的有效性
 后面想加回来可以进一步减少有记忆力的层，或者进一步压缩记忆时长和通道
-flow loss用成spynet算了，停掉10k，重新开启来
+flow loss用成spynet了，停掉10k，重新开启来
 默认的半滑窗逻辑测试：
-CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/large-MFN_ablation_large-MFN-mem-T8C4-LF/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory
-[250k, davis] [本地3090]
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model large-MFN --ckpt release_model/large-MFN_ablation_large-MFN-mem-T8C4-LF/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.99/0.9517/0.191
+All average forward run time: (0.127589) per frame [本地3090]
+精度不如baseline的30.65
 序列测试：
-CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/large-MFN_ablation_large-MFN-mem-T8C4-LF/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
-[250k, davis] [本地3090]
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model large-MFN --ckpt release_model/large-MFN_ablation_large-MFN-mem-T8C4-LF/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.71/0.9485/0.210
+All average forward run time: (0.045632) per frame [本地3090]
+精度不如baseline
 序列测试x2：
-CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/large-MFN_ablation_large-MFN-mem-T8C4-LF/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
-[250k, davis] [本地3090]
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model large-MFN --ckpt release_model/large-MFN_ablation_large-MFN-mem-T8C4-LF/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 30.01/0.9508/0.193
+All average forward run time: (0.089331) per frame[本地3090]
+精度不太行，可能对于大模型，也不是每一层都需要记忆力，在前面的层增加记忆力可能干扰当前帧的特征提取与信息补全
 
 # 为了找到记忆模型精度下降的原因，训练记忆时长2只存储局部帧且不压缩的lite-MFN作为对比 [已完成] 需要55h
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T2C1-LF.json
@@ -486,3 +492,6 @@ CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T1C8-LF-
 
 # 为了找到记忆模型精度下降的原因，训练记忆时长1，只存储局部帧且压缩8 sub-token 4 对齐 的lite-MFN作为对比 [tmux1] 需要h
 CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_lite-MFN-mem-T1C8-LF-align-sub4.json
+
+# 为了找到记忆模型精度下降的原因，训练记忆时长1，只存储局部帧且压缩8的lite-MFN作为对比，只在最后一层记忆 [未开始] 需要h
+python train.py -c configs/ablation_lite-MFN-mem-T1C8-LF-LastMem.json
