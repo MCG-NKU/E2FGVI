@@ -139,13 +139,19 @@ class Trainer:
                 else:
                     self.half_memory = False
 
+                # 是否只有最后一层blk装备记忆力来节省显存消耗，避免记忆干扰当前帧的特征提取
+                if config['model']['last_memory'] != 0:
+                    self.last_memory = True
+                else:
+                    self.last_memory = False
+
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,
                     token_fusion_simple=self.token_fusion_simple, fusion_skip_connect=self.fusion_skip_connect,
                     memory=self.memory, max_mem_len=config['model']['max_mem_len'],
                     compression_factor=config['model']['compression_factor'], mem_pool=self.mem_pool,
                     store_lf=self.store_lf, align_cache=self.align_cache, sub_token_align=self.sub_token_align,
-                    sub_factor=self.sub_factor, half_memory=self.half_memory)
+                    sub_factor=self.sub_factor, half_memory=self.half_memory, last_memory=self.last_memory)
             else:
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,

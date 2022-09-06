@@ -138,7 +138,7 @@ class InpaintGenerator(BaseNetwork):
     def __init__(self, init_weights=True, flow_align=True, skip_dcn=False, flow_guide=False,
                  token_fusion=False, token_fusion_simple=False, fusion_skip_connect=False,
                  memory=False, max_mem_len=8, compression_factor=4, mem_pool=False, store_lf=False, align_cache=False,
-                 sub_token_align=False, sub_factor=1, half_memory=False):
+                 sub_token_align=False, sub_factor=1, half_memory=False, last_memory=False):
         super(InpaintGenerator, self).__init__()
         # channel = 256   # default
         # hidden = 512    # default
@@ -170,6 +170,7 @@ class InpaintGenerator(BaseNetwork):
         sub_token_align = sub_token_align           # 是否在对齐缓存和当前帧时对token通道分组来实现sub-token对齐
         sub_factor = sub_factor                     # sub-token对齐的分组系数，分组系数越大计算损耗越高，分辨率精度越高
         half_memory = half_memory                   # 如果为True，则只有一半的block有记忆力
+        last_memory = last_memory                   # 如果为True，则只有最后一层的block有记忆力
 
         # encoder
         # self.encoder = Encoder()    # default
@@ -301,7 +302,7 @@ class InpaintGenerator(BaseNetwork):
         if not self.token_fusion:
             # default temporal focal transformer
             for i in range(depths):
-                if not half_memory:
+                if not (half_memory or last_memory):
                     # 所有的层都有记忆
                     blocks.append(
                         TemporalFocalTransformerBlock(dim=hidden,
@@ -353,6 +354,40 @@ class InpaintGenerator(BaseNetwork):
                                                           t2t_params=t2t_params,
                                                           pool_method=pool_method,
                                                           memory=False))
+                elif last_memory:
+                    # 只有最后一层有记忆力
+                    if (i + 1) == depths:
+                        # 最后一层有记忆力
+                        blocks.append(
+                            TemporalFocalTransformerBlock(dim=hidden,
+                                                          num_heads=num_heads[i],
+                                                          window_size=window_size[i],
+                                                          focal_level=focal_levels[i],
+                                                          focal_window=focal_windows[i],
+                                                          n_vecs=n_vecs,
+                                                          t2t_params=t2t_params,
+                                                          pool_method=pool_method,
+                                                          memory=self.memory,
+                                                          max_mem_len=max_mem_len,
+                                                          compression_factor=compression_factor,
+                                                          mem_pool=mem_pool,
+                                                          store_lf=store_lf,
+                                                          align_cache=align_cache,
+                                                          sub_token_align=sub_token_align,
+                                                          sub_factor=sub_factor), )
+                    else:
+                        # 前面的层没有记忆
+                        blocks.append(
+                            TemporalFocalTransformerBlock(dim=hidden,
+                                                          num_heads=num_heads[i],
+                                                          window_size=window_size[i],
+                                                          focal_level=focal_levels[i],
+                                                          focal_window=focal_windows[i],
+                                                          n_vecs=n_vecs,
+                                                          t2t_params=t2t_params,
+                                                          pool_method=pool_method,
+                                                          memory=False))
+
             self.transformer = nn.Sequential(*blocks)
         else:
             # 根据token聚合指数修改temporal focal transformer
