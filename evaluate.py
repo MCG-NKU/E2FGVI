@@ -18,7 +18,8 @@ from core.metrics import calc_psnr_and_ssim, calculate_i3d_activations, calculat
 
 # global variables
 w, h = 432, 240     # default acc. test setting in e2fgvi for davis dataset
-# w, h = 864, 480     # davis res 480x854 default speed test setting in e2fgvi for davis dataset
+# w, h = 864, 480     # davis res 480x854
+# w, h = 320, 240     # pal test
 ref_length = 10     # non-local frames的步幅间隔，此处为每10帧取1帧NLF
 neighbor_stride = 5     # local frames的窗口大小，加上自身则窗口大小为6
 default_fps = 24
@@ -53,8 +54,9 @@ def get_ref_index_mem_random(neighbor_ids, video_length, num_ref_frame=3):
 def main_worker(args):
     args.size = (w, h)
     # set up datasets and data loader
-    assert (args.dataset == 'davis') or args.dataset == 'youtube-vos', \
-        f"{args.dataset} dataset is not supported"
+    # default result
+    # assert (args.dataset == 'davis') or args.dataset == 'youtube-vos', \
+    #     f"{args.dataset} dataset is not supported"
     test_dataset = TestDataset(args)
 
     test_loader = DataLoader(test_dataset,
@@ -416,7 +418,7 @@ def main_worker(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='E2FGVI')
     parser.add_argument('--dataset',
-                        choices=['davis', 'youtube-vos'],
+                        choices=['davis', 'youtube-vos', 'pal'],
                         type=str)
     parser.add_argument('--data_root', type=str, required=True)
     parser.add_argument('--model', choices=['e2fgvi', 'e2fgvi_hq', 'e2fgvi_hq-lite', 'lite-MFN', 'large-MFN'], type=str)
