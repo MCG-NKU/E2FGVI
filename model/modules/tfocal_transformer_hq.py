@@ -609,7 +609,7 @@ class WindowAttentionMem(nn.Module):
     def __init__(self, dim, expand_size, window_size, focal_window,
                  focal_level, num_heads, qkv_bias, pool_method,
                  memory, max_mem_len, compression_factor, mem_pool, store_lf, align_cache, sub_token_align, sub_factor,
-                 cross_att, time_att):
+                 cross_att, time_att, time_deco):
 
         super().__init__()
         self.dim = dim
@@ -629,6 +629,7 @@ class WindowAttentionMem(nn.Module):
         self.sub_token_align = sub_token_align
         self.cross_att = cross_att
         self.time_att = time_att
+        self.time_deco = time_deco
 
         if any(i > 0 for i in self.expand_size) and focal_level > 0:
             # get mask for rolled k and rolled v
@@ -701,6 +702,10 @@ class WindowAttentionMem(nn.Module):
 
                     # 将记忆查询输出和当前帧的输出融合
                     self.fusion_proj = nn.Linear(2 * dim, dim)
+
+                    if self.time_deco:
+                        # 解耦时间和空间注意力
+                        self.cm_proj_t = nn.Linear(dim, dim)
 
             else:
                 # memory机制的含参数运算层-[基于池化的压缩]
@@ -840,25 +845,67 @@ class WindowAttentionMem(nn.Module):
                             cm_attn = cm_attn.softmax(dim=-1)
                             cm_x = (cm_attn @ cm_v).transpose(1, 2).reshape(B * T, nH * nW, C)
                             cm_x = self.cm_proj(cm_x)
-                            # q = q.reshape(B, T, nH, nW, C).contiguous()
-                            # cm_k = cm_k.reshape(B, T, nH, nW, C).contiguous()
-                            # cm_v = cm_v.reshape(B, T, nH, nW, C).contiguous()
-                            # k_temp = k  # debug
+                            # 恢复原来的shape
+                            q = q.reshape(B, T, nH, nW, C).contiguous()
+                            cm_k = cm_k.reshape(B, T, nH, nW, C).contiguous()
+                            cm_v = cm_v.reshape(B, T, nH, nW, C).contiguous()
 
                         else:
-                            # 信息将额外在T维度流动，不解耦时间和空间
-                            q = q.reshape(B, self.num_heads, T * nH * nW, C // self.num_heads).contiguous()
-                            cm_k = cm_k.reshape(B, self.num_heads, T * nH * nW, C // self.num_heads).contiguous()
-                            cm_v = cm_v.reshape(B, self.num_heads, T * nH * nW, C // self.num_heads).contiguous()
-                            cm_attn = (q @ cm_k.transpose(-2, -1)) * self.scale
-                            cm_attn = cm_attn.softmax(dim=-1)
-                            cm_x = (cm_attn @ cm_v).transpose(1, 2).reshape(B * T, nH * nW, C)
-                            cm_x = self.cm_proj(cm_x)
+                            # 信息将额外在T维度流动
+                            if not self.time_deco:
+                                # 不解耦时间和空间
+                                q = q.reshape(B, self.num_heads, T * nH * nW, C // self.num_heads).contiguous()
+                                cm_k = cm_k.reshape(B, self.num_heads, T * nH * nW, C // self.num_heads).contiguous()
+                                cm_v = cm_v.reshape(B, self.num_heads, T * nH * nW, C // self.num_heads).contiguous()
+                                cm_attn = (q @ cm_k.transpose(-2, -1)) * self.scale
+                                cm_attn = cm_attn.softmax(dim=-1)
+                                cm_x = (cm_attn @ cm_v).transpose(1, 2).reshape(B * T, nH * nW, C)
+                                cm_x = self.cm_proj(cm_x)
 
-                        # 恢复原来的shape
-                        q = q.reshape(B, T, nH, nW, C).contiguous()
-                        cm_k = cm_k.reshape(B, T, nH, nW, C).contiguous()
-                        cm_v = cm_v.reshape(B, T, nH, nW, C).contiguous()
+                                # 恢复原来的shape
+                                q = q.reshape(B, T, nH, nW, C).contiguous()
+                                cm_k = cm_k.reshape(B, T, nH, nW, C).contiguous()
+                                cm_v = cm_v.reshape(B, T, nH, nW, C).contiguous()
+
+                                # 除了解耦的，前面两个版本的qkv shape变换都需要检查
+                            else:
+                                # 解耦时间和空间注意力
+                                # 时间注意力
+                                q = q.permute(0, 2, 3, 1, 4).reshape(B * nH * nW, T, C // self.num_heads, self.num_heads)\
+                                    .permute(0, 3, 1, 2).contiguous()   # B*N, head, T, C//head
+                                cm_k = cm_k.permute(0, 2, 3, 1, 4).reshape(B * nH * nW, T, C // self.num_heads, self.num_heads)\
+                                    .permute(0, 3, 1, 2).contiguous()
+                                cm_v = cm_v.permute(0, 2, 3, 1, 4).reshape(B * nH * nW, T, C // self.num_heads, self.num_heads)\
+                                    .permute(0, 3, 1, 2).contiguous()
+                                cm_attn_t = (q @ cm_k.transpose(-2, -1)) * self.scale
+                                cm_attn_t = cm_attn_t.softmax(dim=-1)
+                                cm_x_t = (cm_attn_t @ cm_v).permute(0, 2, 3, 1).reshape(B, nH * nW, T, C)\
+                                    .permute(0, 2, 1, 3).reshape(B * T, nH * nW, C)
+                                cm_x_t = self.cm_proj_t(cm_x_t)
+                                # 恢复qkv的shape
+                                q = q.permute(0, 2, 3, 1).reshape(B, nH, nW, T, C).permute(0, 3, 1, 2, 4).contiguous()
+                                cm_k = cm_k.permute(0, 2, 3, 1).reshape(B, nH, nW, T, C).permute(0, 3, 1, 2, 4).contiguous()
+                                cm_v = cm_v.permute(0, 2, 3, 1).reshape(B, nH, nW, T, C).permute(0, 3, 1, 2, 4).contiguous()
+
+                                # 空间注意力
+                                q = q.reshape(B * T, nH * nW, C // self.num_heads, self.num_heads).permute(0, 3, 1, 2)\
+                                    .contiguous()   # BT, head, N, C//head
+                                cm_k = cm_k.reshape(B * T, nH * nW, C // self.num_heads, self.num_heads).permute(0, 3, 1, 2)\
+                                    .contiguous()
+                                cm_v = cm_v.reshape(B * T, nH * nW, C // self.num_heads, self.num_heads).permute(0, 3, 1, 2)\
+                                    .contiguous()
+                                cm_attn = (q @ cm_k.transpose(-2, -1)) * self.scale
+                                cm_attn = cm_attn.softmax(dim=-1)
+                                cm_x = (cm_attn @ cm_v).transpose(1, 2).reshape(B * T, nH * nW, C)
+                                cm_x = self.cm_proj(cm_x)
+                                # 恢复qkv的shape
+                                q = q.permute(0, 2, 3, 1).reshape(B, T, nH, nW, C).contiguous()
+                                cm_k = cm_k.permute(0, 2, 3, 1).reshape(B, T, nH, nW, C).contiguous()
+                                cm_v = cm_v.permute(0, 2, 3, 1).reshape(B, T, nH, nW, C).contiguous()
+
+                                # 暂时只使用相加融合两次查询
+                                cm_x += cm_x_t
+
                         k_temp = k  # debug
 
                 else:
@@ -1371,6 +1418,7 @@ class TemporalFocalTransformerBlock(nn.Module):
         sub_factor (int): How many groups of sub-token alignment.
         cross_att (bool): Whether use cross attention to align memory and current token.
         time_att (bool): If True, use cross attention to align memory and current token additionally on T dimension.
+        time_deco (bool): If True, the Time and Space Cross Att. will be decoupled to reduce cost.
     """
     def __init__(self,
                  dim,
@@ -1394,7 +1442,8 @@ class TemporalFocalTransformerBlock(nn.Module):
                  sub_token_align=False,
                  sub_factor=1,
                  cross_att=False,
-                 time_att=False):
+                 time_att=False,
+                 time_deco=False):
         super().__init__()
         self.dim = dim
         self.num_heads = num_heads
@@ -1452,7 +1501,8 @@ class TemporalFocalTransformerBlock(nn.Module):
                                            sub_token_align=sub_token_align,
                                            sub_factor=sub_factor,
                                            cross_att=cross_att,
-                                           time_att=time_att)
+                                           time_att=time_att,
+                                           time_deco=time_deco)
 
         self.norm2 = norm_layer(dim)
         self.mlp = FusionFeedForward(dim, n_vecs=n_vecs, t2t_params=t2t_params)

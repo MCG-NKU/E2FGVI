@@ -139,7 +139,7 @@ class InpaintGenerator(BaseNetwork):
                  token_fusion=False, token_fusion_simple=False, fusion_skip_connect=False,
                  memory=False, max_mem_len=8, compression_factor=4, mem_pool=False, store_lf=False, align_cache=False,
                  sub_token_align=False, sub_factor=1, half_memory=False, last_memory=False,
-                 cross_att=False, time_att=False):
+                 cross_att=False, time_att=False, time_deco=False):
         super(InpaintGenerator, self).__init__()
         # channel = 256   # default
         # hidden = 512    # default
@@ -174,6 +174,7 @@ class InpaintGenerator(BaseNetwork):
         last_memory = last_memory                   # 如果为True，则只有最后一层的block有记忆力
         cross_att = cross_att                       # 如果为True，使用cross attention融合记忆与当前帧
         time_att = time_att                         # 如果为True，使用cross attention额外在T维度融合记忆与当前帧
+        time_deco = time_deco                       # 如果为True，则cross attention会把时间和空间解耦
 
         # encoder
         # self.encoder = Encoder()    # default
@@ -399,7 +400,8 @@ class InpaintGenerator(BaseNetwork):
                                                               sub_token_align=sub_token_align,
                                                               sub_factor=sub_factor,
                                                               cross_att=cross_att,
-                                                              time_att=time_att), )
+                                                              time_att=time_att,
+                                                              time_deco=time_deco), )
                     else:
                         # 前面的层没有记忆
                         blocks.append(
