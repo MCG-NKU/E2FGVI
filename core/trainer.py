@@ -145,11 +145,17 @@ class Trainer:
                 else:
                     self.last_memory = False
 
-                # 是否使用cross attention融合记忆与当前特征
+                # 是否使用cross attention融合记忆与当前特征(在Nh Nw维度流动信息)
                 if config['model']['cross_att'] != 0:
                     self.cross_att = True
                 else:
                     self.cross_att = False
+
+                # 是否对时序上的信息也使用cross attention融合(额外在T维度流动信息)
+                if config['model']['time_att'] != 0:
+                    self.time_att = True
+                else:
+                    self.time_att = False
 
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,
@@ -158,7 +164,7 @@ class Trainer:
                     compression_factor=config['model']['compression_factor'], mem_pool=self.mem_pool,
                     store_lf=self.store_lf, align_cache=self.align_cache, sub_token_align=self.sub_token_align,
                     sub_factor=self.sub_factor, half_memory=self.half_memory, last_memory=self.last_memory,
-                    cross_att=self.cross_att)
+                    cross_att=self.cross_att, time_att=self.time_att)
             else:
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,

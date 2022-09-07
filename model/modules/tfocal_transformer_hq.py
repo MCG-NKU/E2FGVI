@@ -609,7 +609,7 @@ class WindowAttentionMem(nn.Module):
     def __init__(self, dim, expand_size, window_size, focal_window,
                  focal_level, num_heads, qkv_bias, pool_method,
                  memory, max_mem_len, compression_factor, mem_pool, store_lf, align_cache, sub_token_align, sub_factor,
-                 cross_att):
+                 cross_att, time_att):
 
         super().__init__()
         self.dim = dim
@@ -628,6 +628,7 @@ class WindowAttentionMem(nn.Module):
         self.align_cache = align_cache
         self.sub_token_align = sub_token_align
         self.cross_att = cross_att
+        self.time_att = time_att
 
         if any(i > 0 for i in self.expand_size) and focal_level > 0:
             # get mask for rolled k and rolled v
@@ -683,13 +684,16 @@ class WindowAttentionMem(nn.Module):
                 # 兼容局部非局部都存储和只存储局部帧的行为
                 self.f_k = nn.Linear(dim, dim // self.compression_factor, bias=True)  # 用于更新上一时刻的k并压缩之前的记忆张量
                 self.f_v = nn.Linear(dim, dim // self.compression_factor, bias=True)  # 用于更新上一时刻的v并压缩之前的记忆张量
-                self.lin_q = nn.Linear(dim, dim, bias=True)  # 用于把当前的q转换为适合查找记忆力的q
-                self.lin_k = nn.Linear(
-                    dim + dim // self.compression_factor * self.max_len,
-                    dim, bias=True)  # 用于把记忆里的k和当前的k进行融合
-                self.lin_v = nn.Linear(
-                    dim + dim // self.compression_factor * self.max_len,
-                    dim, bias=True)  # 用于把记忆里的v和当前的v进行融合
+
+                if not self.cross_att:
+                    # 使用线性层聚合时需要这些层
+                    self.lin_q = nn.Linear(dim, dim, bias=True)  # 用于把当前的q转换为适合查找记忆力的q
+                    self.lin_k = nn.Linear(
+                        dim + dim // self.compression_factor * self.max_len,
+                        dim, bias=True)  # 用于把记忆里的k和当前的k进行融合
+                    self.lin_v = nn.Linear(
+                        dim + dim // self.compression_factor * self.max_len,
+                        dim, bias=True)  # 用于把记忆里的v和当前的v进行融合
 
                 if self.cross_att:
                     # 使用cross attention对齐记忆缓存和当前帧
@@ -827,13 +831,31 @@ class WindowAttentionMem(nn.Module):
 
                     else:
                         # 使用cross attention聚合记忆
-                        q = q.reshape(B * T, self.num_heads, nH * nW, C // self.num_heads).contiguous()
-                        cm_k = cm_k.reshape(B * T, self.num_heads, nH * nW, C // self.num_heads).contiguous()
-                        cm_v = cm_v.reshape(B * T, self.num_heads, nH * nW, C // self.num_heads).contiguous()
-                        cm_attn = (q @ cm_k.transpose(-2, -1)) * self.scale
-                        cm_attn = cm_attn.softmax(dim=-1)
-                        cm_x = (cm_attn @ cm_v).transpose(1, 2).reshape(B * T, nH * nW, C)
-                        cm_x = self.cm_proj(cm_x)
+                        if not self.time_att:
+                            # 信息只在Nh Nw维度流动(空间维度)
+                            q = q.reshape(B * T, self.num_heads, nH * nW, C // self.num_heads).contiguous()
+                            cm_k = cm_k.reshape(B * T, self.num_heads, nH * nW, C // self.num_heads).contiguous()
+                            cm_v = cm_v.reshape(B * T, self.num_heads, nH * nW, C // self.num_heads).contiguous()
+                            cm_attn = (q @ cm_k.transpose(-2, -1)) * self.scale
+                            cm_attn = cm_attn.softmax(dim=-1)
+                            cm_x = (cm_attn @ cm_v).transpose(1, 2).reshape(B * T, nH * nW, C)
+                            cm_x = self.cm_proj(cm_x)
+                            # q = q.reshape(B, T, nH, nW, C).contiguous()
+                            # cm_k = cm_k.reshape(B, T, nH, nW, C).contiguous()
+                            # cm_v = cm_v.reshape(B, T, nH, nW, C).contiguous()
+                            # k_temp = k  # debug
+
+                        else:
+                            # 信息将额外在T维度流动，不解耦时间和空间
+                            q = q.reshape(B, self.num_heads, T * nH * nW, C // self.num_heads).contiguous()
+                            cm_k = cm_k.reshape(B, self.num_heads, T * nH * nW, C // self.num_heads).contiguous()
+                            cm_v = cm_v.reshape(B, self.num_heads, T * nH * nW, C // self.num_heads).contiguous()
+                            cm_attn = (q @ cm_k.transpose(-2, -1)) * self.scale
+                            cm_attn = cm_attn.softmax(dim=-1)
+                            cm_x = (cm_attn @ cm_v).transpose(1, 2).reshape(B * T, nH * nW, C)
+                            cm_x = self.cm_proj(cm_x)
+
+                        # 恢复原来的shape
                         q = q.reshape(B, T, nH, nW, C).contiguous()
                         cm_k = cm_k.reshape(B, T, nH, nW, C).contiguous()
                         cm_v = cm_v.reshape(B, T, nH, nW, C).contiguous()
@@ -1348,6 +1370,7 @@ class TemporalFocalTransformerBlock(nn.Module):
         sub_token_align (bool): If True, memory cache will be aligned at sub-token resolution.
         sub_factor (int): How many groups of sub-token alignment.
         cross_att (bool): Whether use cross attention to align memory and current token.
+        time_att (bool): If True, use cross attention to align memory and current token additionally on T dimension.
     """
     def __init__(self,
                  dim,
@@ -1370,7 +1393,8 @@ class TemporalFocalTransformerBlock(nn.Module):
                  align_cache=False,
                  sub_token_align=False,
                  sub_factor=1,
-                 cross_att=False):
+                 cross_att=False,
+                 time_att=False):
         super().__init__()
         self.dim = dim
         self.num_heads = num_heads
@@ -1427,7 +1451,8 @@ class TemporalFocalTransformerBlock(nn.Module):
                                            align_cache=align_cache,
                                            sub_token_align=sub_token_align,
                                            sub_factor=sub_factor,
-                                           cross_att=cross_att)
+                                           cross_att=cross_att,
+                                           time_att=time_att)
 
         self.norm2 = norm_layer(dim)
         self.mlp = FusionFeedForward(dim, n_vecs=n_vecs, t2t_params=t2t_params)
