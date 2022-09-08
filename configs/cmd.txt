@@ -586,12 +586,14 @@ CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T1C1-Las
 # 实现T-N-记忆Linear聚合 [未开始]
 
 # 测试基于 cross attention 记忆力聚合的训练显存消耗
-# 基于本地3090测试
+# 基于本地3090/3090Ti测试
 1.large-MFN-T1C1-LastMem-csT-deco 可以单卡bs2正常训练
 2.large-MFN-T1C1-LastMem-csT 可以单卡bs2正常训练 但是速度非常非常慢
 3.large-MFN-T1C1-HalfMem-csT 炸裂，不可以训练
 4.large-MFN-T1C1-HalfMem-csT-deco 可以单卡bs2正常训练
 5.large-MFN-T1C1-csT-deco 所有层都有记忆力，可以单卡bs2正常训练 但是速度非常非常慢
+6.large-MFN-T2C1-LastMem-csT-deco 可以单卡bs2正常训练
+7.large-MFN-T2C1-HalfMem-csT-deco 可以单卡bs2正常训练 但是速度非常非常慢
 看来时空解耦进行attention非常有必要。
 
 # 实现基于窗口cross attention的记忆力聚合 [未开始]
@@ -601,4 +603,4 @@ CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T1C1-Las
 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-tf.json
 
 # 实现对于attention更长的记忆力聚合，在att前先用线性层聚合缓存 [未开始]
-CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T2C2-LastMem-csT-deco.json
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T2C1-LastMem-csT-deco.json

@@ -1003,6 +1003,16 @@ class WindowAttentionMem(nn.Module):
 
                 if self.cross_att:
                     # 使用cross attention对齐记忆缓存和当前帧
+
+                    # 当记忆时间大于1时，需要先将缓存里的记忆压缩到和当前迭代同样尺度，才能做attention.
+                    if self.max_len > 1:
+                        self.lin_k = nn.Linear(
+                            dim // self.compression_factor * self.max_len,
+                            dim, bias=qkv_bias)  # 用于把记忆里的k和当前的k进行融合
+                        self.lin_v = nn.Linear(
+                            dim // self.compression_factor * self.max_len,
+                            dim, bias=qkv_bias)  # 用于把记忆里的v和当前的v进行融合
+
                     # 将记忆查询输出和当前帧的输出融合
                     self.fusion_proj = nn.Linear(2 * dim, dim)
                     if not self.temp_focal:
@@ -1153,19 +1163,49 @@ class WindowAttentionMem(nn.Module):
 
                     else:
                         # 使用cross attention聚合记忆
+
+                        # 聚合记忆缓存，用于后续和当前特征进行cross attention
+                        if self.max_len == 1:
+                            # 只记忆1次迭代时，不需要聚合
+                            mem_k = cm_k
+                            mem_v = cm_v
+                        else:
+                            # 记忆缓存时间大于1，需要聚合
+                            if len(self.m_k) == self.max_len:
+                                # 记忆缓存满了，直接用线性层聚合
+                                # 因为缓存里的最后一帧还没被压缩的替换，所以不取最后一帧
+                                mem_k = self.lin_k(torch.cat((
+                                    torch.cat(self.m_k[:-1], dim=4), cm_k), dim=4))
+                                mem_v = self.lin_v(torch.cat((
+                                    torch.cat(self.m_v[:-1], dim=4), cm_v), dim=4))
+                            else:
+                                # 记忆缓存没满，复制一下
+                                repeat_k = self.max_len - len(self.m_k)
+                                repeat_v = self.max_len - len(self.m_v)
+                                if len(self.m_k) == 0:
+                                    # 缓存里面啥也没有，当前帧多复制几次
+                                    mem_k = self.lin_k(cm_k.repeat(1, 1, 1, 1, repeat_k))
+                                    mem_v = self.lin_v(cm_v.repeat(1, 1, 1, 1, repeat_k))
+                                else:
+                                    # 尽量使用缓存中的帧
+                                    mem_k = self.lin_k(torch.cat((
+                                        torch.cat(self.m_k[:-1], dim=4), cm_k.repeat(1, 1, 1, 1, repeat_k + 1)), dim=4))
+                                    mem_v = self.lin_v(torch.cat((
+                                        torch.cat(self.m_v[:-1], dim=4), cm_v.repeat(1, 1, 1, 1, repeat_v + 1)), dim=4))
+
                         if not self.time_att:
                             # 信息只在Nh Nw维度流动(空间维度)
                             q = q.reshape(B * T, self.num_heads, nH * nW, C // self.num_heads).contiguous()
-                            cm_k = cm_k.reshape(B * T, self.num_heads, nH * nW, C // self.num_heads).contiguous()
-                            cm_v = cm_v.reshape(B * T, self.num_heads, nH * nW, C // self.num_heads).contiguous()
-                            cm_attn = (q @ cm_k.transpose(-2, -1)) * self.scale
+                            mem_k = mem_k.reshape(B * T, self.num_heads, nH * nW, C // self.num_heads).contiguous()
+                            mem_v = mem_v.reshape(B * T, self.num_heads, nH * nW, C // self.num_heads).contiguous()
+                            cm_attn = (q @ mem_k.transpose(-2, -1)) * self.scale
                             cm_attn = cm_attn.softmax(dim=-1)
-                            cm_x = (cm_attn @ cm_v).transpose(1, 2).reshape(B * T, nH * nW, C)
+                            cm_x = (cm_attn @ mem_v).transpose(1, 2).reshape(B * T, nH * nW, C)
                             cm_x = self.cm_proj(cm_x)
                             # 恢复原来的shape
                             q = q.reshape(B, T, nH, nW, C).contiguous()
-                            cm_k = cm_k.reshape(B, T, nH, nW, C).contiguous()
-                            cm_v = cm_v.reshape(B, T, nH, nW, C).contiguous()
+                            # mem_k = mem_k.reshape(B, T, nH, nW, C).contiguous()
+                            # mem_v = mem_v.reshape(B, T, nH, nW, C).contiguous()
 
                         else:
                             # 信息将额外在T维度流动
@@ -1174,57 +1214,57 @@ class WindowAttentionMem(nn.Module):
                                 # 时间注意力
                                 q = q.permute(0, 2, 3, 1, 4).reshape(B * nH * nW, T, C // self.num_heads, self.num_heads)\
                                     .permute(0, 3, 1, 2).contiguous()   # B*N, head, T, C//head
-                                cm_k = cm_k.permute(0, 2, 3, 1, 4).reshape(B * nH * nW, T, C // self.num_heads, self.num_heads)\
+                                mem_k = mem_k.permute(0, 2, 3, 1, 4).reshape(B * nH * nW, T, C // self.num_heads, self.num_heads)\
                                     .permute(0, 3, 1, 2).contiguous()
-                                cm_v = cm_v.permute(0, 2, 3, 1, 4).reshape(B * nH * nW, T, C // self.num_heads, self.num_heads)\
+                                mem_v = mem_v.permute(0, 2, 3, 1, 4).reshape(B * nH * nW, T, C // self.num_heads, self.num_heads)\
                                     .permute(0, 3, 1, 2).contiguous()
-                                cm_attn_t = (q @ cm_k.transpose(-2, -1)) * self.scale
+                                cm_attn_t = (q @ mem_k.transpose(-2, -1)) * self.scale
                                 cm_attn_t = cm_attn_t.softmax(dim=-1)
-                                cm_x_t = (cm_attn_t @ cm_v).permute(0, 2, 3, 1).reshape(B, nH * nW, T, C)\
+                                cm_x_t = (cm_attn_t @ mem_v).permute(0, 2, 3, 1).reshape(B, nH * nW, T, C)\
                                     .permute(0, 2, 1, 3).reshape(B * T, nH * nW, C)
                                 cm_x_t = self.cm_proj_t(cm_x_t)
                                 # 恢复qkv的shape
                                 q = q.permute(0, 2, 3, 1).reshape(B, nH, nW, T, C).permute(0, 3, 1, 2, 4).contiguous()
-                                cm_k = cm_k.permute(0, 2, 3, 1).reshape(B, nH, nW, T, C).permute(0, 3, 1, 2, 4).contiguous()
-                                cm_v = cm_v.permute(0, 2, 3, 1).reshape(B, nH, nW, T, C).permute(0, 3, 1, 2, 4).contiguous()
+                                mem_k = mem_k.permute(0, 2, 3, 1).reshape(B, nH, nW, T, C).permute(0, 3, 1, 2, 4).contiguous()
+                                mem_v = mem_v.permute(0, 2, 3, 1).reshape(B, nH, nW, T, C).permute(0, 3, 1, 2, 4).contiguous()
 
                                 # 空间注意力
                                 q = q.reshape(B * T, nH * nW, C // self.num_heads, self.num_heads).permute(0, 3, 1, 2)\
                                     .contiguous()   # BT, head, N, C//head
-                                cm_k = cm_k.reshape(B * T, nH * nW, C // self.num_heads, self.num_heads).permute(0, 3, 1, 2)\
+                                mem_k = mem_k.reshape(B * T, nH * nW, C // self.num_heads, self.num_heads).permute(0, 3, 1, 2)\
                                     .contiguous()
-                                cm_v = cm_v.reshape(B * T, nH * nW, C // self.num_heads, self.num_heads).permute(0, 3, 1, 2)\
+                                mem_v = mem_v.reshape(B * T, nH * nW, C // self.num_heads, self.num_heads).permute(0, 3, 1, 2)\
                                     .contiguous()
-                                cm_attn = (q @ cm_k.transpose(-2, -1)) * self.scale
+                                cm_attn = (q @ mem_k.transpose(-2, -1)) * self.scale
                                 cm_attn = cm_attn.softmax(dim=-1)
-                                cm_x = (cm_attn @ cm_v).transpose(1, 2).reshape(B * T, nH * nW, C)
+                                cm_x = (cm_attn @ mem_v).transpose(1, 2).reshape(B * T, nH * nW, C)
                                 cm_x = self.cm_proj(cm_x)
                                 # 恢复qkv的shape
                                 q = q.permute(0, 2, 3, 1).reshape(B, T, nH, nW, C).contiguous()
-                                cm_k = cm_k.permute(0, 2, 3, 1).reshape(B, T, nH, nW, C).contiguous()
-                                cm_v = cm_v.permute(0, 2, 3, 1).reshape(B, T, nH, nW, C).contiguous()
+                                # mem_k = mem_k.permute(0, 2, 3, 1).reshape(B, T, nH, nW, C).contiguous()
+                                # mem_v = mem_v.permute(0, 2, 3, 1).reshape(B, T, nH, nW, C).contiguous()
 
                                 # 暂时只使用相加融合两次查询
                                 cm_x += cm_x_t
 
                             elif self.temp_focal:
                                 # 基于temporal focal attention实现时空记忆聚合
-                                cm_x = self.cf_att(qkv=[q, cm_k, cm_v], mask_all=mask_all)
+                                cm_x = self.cf_att(qkv=[q, mem_k, mem_v], mask_all=mask_all)
 
                             else:
                                 # 不解耦时间和空间
                                 q = q.reshape(B, self.num_heads, T * nH * nW, C // self.num_heads).contiguous()
-                                cm_k = cm_k.reshape(B, self.num_heads, T * nH * nW, C // self.num_heads).contiguous()
-                                cm_v = cm_v.reshape(B, self.num_heads, T * nH * nW, C // self.num_heads).contiguous()
-                                cm_attn = (q @ cm_k.transpose(-2, -1)) * self.scale
+                                mem_k = mem_k.reshape(B, self.num_heads, T * nH * nW, C // self.num_heads).contiguous()
+                                mem_v = mem_v.reshape(B, self.num_heads, T * nH * nW, C // self.num_heads).contiguous()
+                                cm_attn = (q @ mem_k.transpose(-2, -1)) * self.scale
                                 cm_attn = cm_attn.softmax(dim=-1)
-                                cm_x = (cm_attn @ cm_v).transpose(1, 2).reshape(B * T, nH * nW, C)
+                                cm_x = (cm_attn @ mem_v).transpose(1, 2).reshape(B * T, nH * nW, C)
                                 cm_x = self.cm_proj(cm_x)
 
                                 # 恢复原来的shape
                                 q = q.reshape(B, T, nH, nW, C).contiguous()
-                                cm_k = cm_k.reshape(B, T, nH, nW, C).contiguous()
-                                cm_v = cm_v.reshape(B, T, nH, nW, C).contiguous()
+                                # mem_k = mem_k.reshape(B, T, nH, nW, C).contiguous()
+                                # mem_v = mem_v.reshape(B, T, nH, nW, C).contiguous()
 
                                 # 除了解耦的，前面两个版本的qkv shape变换都需要检查
 
