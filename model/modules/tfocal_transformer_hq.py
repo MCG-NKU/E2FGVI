@@ -347,6 +347,308 @@ def window_reverse(windows, window_size, T, H, W):
     return x
 
 
+class CrossFocalAttention(nn.Module):
+    """Cross Temporal focal window attention based on t-focal window attention of e2fgvi."""
+    def __init__(self, dim, expand_size, window_size, focal_window,
+                 focal_level, num_heads, qkv_bias, pool_method):
+
+        super().__init__()
+        self.dim = dim
+        self.expand_size = expand_size
+        self.window_size = window_size  # Wh, Ww
+        self.pool_method = pool_method
+        self.num_heads = num_heads
+        head_dim = dim // num_heads
+        self.scale = head_dim**-0.5
+        self.focal_level = focal_level
+        self.focal_window = focal_window
+
+        if any(i > 0 for i in self.expand_size) and focal_level > 0:
+            # get mask for rolled k and rolled v
+            mask_tl = torch.ones(self.window_size[0], self.window_size[1])
+            mask_tl[:-self.expand_size[0], :-self.expand_size[1]] = 0
+            mask_tr = torch.ones(self.window_size[0], self.window_size[1])
+            mask_tr[:-self.expand_size[0], self.expand_size[1]:] = 0
+            mask_bl = torch.ones(self.window_size[0], self.window_size[1])
+            mask_bl[self.expand_size[0]:, :-self.expand_size[1]] = 0
+            mask_br = torch.ones(self.window_size[0], self.window_size[1])
+            mask_br[self.expand_size[0]:, self.expand_size[1]:] = 0
+            mask_rolled = torch.stack((mask_tl, mask_tr, mask_bl, mask_br),
+                                      0).flatten(0)
+            self.register_buffer("valid_ind_rolled",
+                                 mask_rolled.nonzero(as_tuple=False).view(-1))
+
+        if pool_method != "none" and focal_level > 1:
+            self.unfolds = nn.ModuleList()
+
+            # build relative position bias between local patch and pooled windows
+            for k in range(focal_level - 1):
+                stride = 2**k
+                kernel_size = tuple(2 * (i // 2) + 2**k + (2**k - 1)
+                                    for i in self.focal_window)
+                # define unfolding operations
+                self.unfolds += [
+                    nn.Unfold(kernel_size=kernel_size,
+                              stride=stride,
+                              padding=tuple(i // 2 for i in kernel_size))
+                ]
+
+                # define unfolding index for focal_level > 0
+                if k > 0:
+                    mask = torch.zeros(kernel_size)
+                    mask[(2**k) - 1:, (2**k) - 1:] = 1
+                    self.register_buffer(
+                        "valid_ind_unfold_{}".format(k),
+                        mask.flatten(0).nonzero(as_tuple=False).view(-1))
+
+        # qkv是现成的因此不需要重新编码
+        # self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+
+        self.proj = nn.Linear(dim, dim)
+
+        self.softmax = nn.Softmax(dim=-1)
+
+        # 用于池化记忆kv的层
+        self.pool_layers = nn.ModuleList()
+        if self.pool_method != "none":
+            # for k in range(self.focal_level - 1):
+            # focal level=2, k=0
+            window_size_glo = tuple(
+                math.floor(i) for i in self.window_size)
+            self.pool_layers.append(
+                nn.Linear(window_size_glo[0] * window_size_glo[1], 1))
+            self.pool_layers[-1].weight.data.fill_(
+                1. / (window_size_glo[0] * window_size_glo[1]))
+            self.pool_layers[-1].bias.data.fill_(0)
+
+    def forward(self, qkv, mask_all=None):
+        """
+        Args:
+            x: input qkv with shape of (3, B, T, Wh, Ww, C) from different modality
+            mask: (0/-inf) mask with shape of (num_windows, T*Wh*Ww, T*Wh*Ww) or None
+
+            output: (nW*B, Wh*Ww, C)
+        """
+        q, k, v = qkv[0], qkv[1], qkv[2]  # B, T, nH, nW, C
+        B, T, nH, nW, C = q.shape   # nH/W是多少个token；nWh/w是多少个window
+        nWh = nH // self.window_size[0]
+        nWw = nW // self.window_size[1]
+
+        # 生成池化的qkv代替原来从池化的特征x_all[1]中编码全局(window内池化)qkv的操作, 注意q的形状没有改变过
+        # 首先实现直接池化获得池化qkv的方法
+        # x_windows_noreshape = x_windows_noreshape.view(
+        #     B, nWh, nWw, T, window_size_glo[0] * window_size_glo[1],
+        #     C).transpose(4, 5)  # B, nWh, nWw, T, C, window_size_h*window_size_w
+        # x_windows_pooled = self.pool_layers[k](
+        #     x_windows_noreshape).flatten(-2)  # B, nWh, nWw, T, C | window被池化聚合
+
+        # 改变kv形状->B, nWh, nWw, T, C, window_size_h*window_size_w
+        k = k.reshape(B, T, nWh, self.window_size[0], nWw, self.window_size[1], C).permute(0, 2, 4, 1, 6, 3, 5) \
+            .reshape(B, nWh, nWw, T, C, self.window_size[0] * self.window_size[1]).contiguous()
+        v = v.reshape(B, T, nWh, self.window_size[0], nWw, self.window_size[1], C).permute(0, 2, 4, 1, 6, 3, 5) \
+            .reshape(B, nWh, nWw, T, C, self.window_size[0] * self.window_size[1]).contiguous()
+
+        # 池化kv
+        k_pooled_k = self.pool_layers[0](k).flatten(-2)  # B, nWh, nWw, T, C
+        v_pooled_k = self.pool_layers[0](v).flatten(-2)  # B, nWh, nWw, T, C
+
+        # 转化池化后的kv到需要的shape
+        k_pooled_k = k_pooled_k.permute(0, 3, 4, 1, 2).reshape(B * T, C, nWh, nWw).contiguous()  # B*T, C, nWh, nWw
+        v_pooled_k = v_pooled_k.permute(0, 3, 4, 1, 2).reshape(B * T, C, nWh, nWw).contiguous()  # B*T, C, nWh, nWw
+
+        # 恢复kv形状->B, T, nH, nW, C
+        k = k.reshape(B, nWh, nWw, T, C, self.window_size[0], self.window_size[1]).permute(0, 3, 1, 5, 2, 6, 4) \
+            .reshape(B, T, nH, nW, C).contiguous()
+        v = v.reshape(B, nWh, nWw, T, C, self.window_size[0], self.window_size[1]).permute(0, 3, 1, 5, 2, 6, 4) \
+            .reshape(B, T, nH, nW, C).contiguous()
+
+        # partition q map
+        (q_windows, k_windows, v_windows) = map(
+            lambda t: window_partition(t, self.window_size).view(
+                -1, T, self.window_size[0] * self.window_size[1], self.
+                num_heads, C // self.num_heads).permute(0, 3, 1, 2, 4).
+            contiguous().view(-1, self.num_heads, T * self.window_size[
+                0] * self.window_size[1], C // self.num_heads), (q, k, v))
+        # q(k/v)_windows shape : [16, 4, 225, 128]
+
+        if any(i > 0 for i in self.expand_size) and self.focal_level > 0:
+            (k_tl, v_tl) = map(
+                lambda t: torch.roll(t,
+                                     shifts=(-self.expand_size[0], -self.
+                                             expand_size[1]),
+                                     dims=(2, 3)), (k, v))
+            (k_tr, v_tr) = map(
+                lambda t: torch.roll(t,
+                                     shifts=(-self.expand_size[0], self.
+                                             expand_size[1]),
+                                     dims=(2, 3)), (k, v))
+            (k_bl, v_bl) = map(
+                lambda t: torch.roll(t,
+                                     shifts=(self.expand_size[0], -self.
+                                             expand_size[1]),
+                                     dims=(2, 3)), (k, v))
+            (k_br, v_br) = map(
+                lambda t: torch.roll(t,
+                                     shifts=(self.expand_size[0], self.
+                                             expand_size[1]),
+                                     dims=(2, 3)), (k, v))
+
+            (k_tl_windows, k_tr_windows, k_bl_windows, k_br_windows) = map(
+                lambda t: window_partition(t, self.window_size).view(
+                    -1, T, self.window_size[0] * self.window_size[1], self.
+                    num_heads, C // self.num_heads), (k_tl, k_tr, k_bl, k_br))
+            (v_tl_windows, v_tr_windows, v_bl_windows, v_br_windows) = map(
+                lambda t: window_partition(t, self.window_size).view(
+                    -1, T, self.window_size[0] * self.window_size[1], self.
+                    num_heads, C // self.num_heads), (v_tl, v_tr, v_bl, v_br))
+            k_rolled = torch.cat(
+                (k_tl_windows, k_tr_windows, k_bl_windows, k_br_windows),
+                2).permute(0, 3, 1, 2, 4).contiguous()
+            v_rolled = torch.cat(
+                (v_tl_windows, v_tr_windows, v_bl_windows, v_br_windows),
+                2).permute(0, 3, 1, 2, 4).contiguous()
+
+            # mask out tokens in current window
+            k_rolled = k_rolled[:, :, :, self.valid_ind_rolled]
+            v_rolled = v_rolled[:, :, :, self.valid_ind_rolled]
+            temp_N = k_rolled.shape[3]
+            k_rolled = k_rolled.view(-1, self.num_heads, T * temp_N,
+                                     C // self.num_heads)
+            v_rolled = v_rolled.view(-1, self.num_heads, T * temp_N,
+                                     C // self.num_heads)
+            k_rolled = torch.cat((k_windows, k_rolled), 2)
+            v_rolled = torch.cat((v_windows, v_rolled), 2)
+        else:
+            k_rolled = k_windows
+            v_rolled = v_windows
+
+        # q(k/v)_windows shape : [16, 4, 225, 128]
+        # k_rolled.shape : [16, 4, 5, 165, 128]
+        # ideal expanded window size 153 ((5+2*2)*(9+2*4))
+        # k_windows=45 expand_window=108 overlap_window=12 (since expand_size < window_size / 2)
+
+        if self.pool_method != "none" and self.focal_level > 1:
+            k_pooled = []
+            v_pooled = []
+            for k in range(self.focal_level - 1):
+                stride = 2**k
+
+                # # B, T, nWh, nWw, C
+                # x_window_pooled = x_all[k + 1].permute(0, 3, 1, 2,
+                #                                        4).contiguous()
+
+                # nWh, nWw = x_window_pooled.shape[2:4]
+
+                # generate mask for pooled windows, 这里的.new创建的内容和原来的无关, 只要个形状罢了
+                # mask = x_window_pooled.new(T, nWh, nWw).fill_(1)
+                mask = k_pooled_k.reshape(B, T, C, nWh, nWw).permute(0, 1, 3, 4, 2).new(T, nWh, nWw).fill_(1)
+
+                # unfold mask: [nWh*nWw//s//s, k*k, 1]
+                unfolded_mask = self.unfolds[k](mask.unsqueeze(1)).view(
+                    1, T, self.unfolds[k].kernel_size[0], self.unfolds[k].kernel_size[1], -1).permute(4, 1, 2, 3, 0).contiguous().\
+                    view(nWh*nWw // stride // stride, -1, 1)
+
+                if k > 0:
+                    valid_ind_unfold_k = getattr(
+                        self, "valid_ind_unfold_{}".format(k))
+                    unfolded_mask = unfolded_mask[:, valid_ind_unfold_k]
+
+                x_window_masks = unfolded_mask.flatten(1).unsqueeze(0)
+                x_window_masks = x_window_masks.masked_fill(
+                    x_window_masks == 0,
+                    float(-100.0)).masked_fill(x_window_masks > 0, float(0.0))
+                mask_all[k + 1] = x_window_masks
+
+                # # qkv是现成的，不需要重新编码
+                # # generate k and v for pooled windows
+                # qkv_pooled = self.qkv(x_window_pooled).reshape(
+                #     B, T, nWh, nWw, 3, C).permute(4, 0, 1, 5, 2,
+                #                                   3).view(3, -1, C, nWh,
+                #                                           nWw).contiguous()
+                # # B*T, C, nWh, nWw
+                # k_pooled_k, v_pooled_k = qkv_pooled[1], qkv_pooled[2]
+
+                # k_pooled_k shape: [5, 512, 4, 4]
+                # self.unfolds[k](k_pooled_k) shape: [5, 23040 (512 * 5 * 9 ), 16]
+
+                (k_pooled_k, v_pooled_k) = map(
+                    lambda t: self.unfolds[k]
+                    (t).view(B, T, C, self.unfolds[k].kernel_size[0], self.
+                             unfolds[k].kernel_size[1], -1)
+                    .permute(0, 5, 1, 3, 4, 2).contiguous().view(
+                        -1, T, self.unfolds[k].kernel_size[0] * self.unfolds[
+                            k].kernel_size[1], self.num_heads, C // self.
+                        num_heads).permute(0, 3, 1, 2, 4).contiguous(),
+                    # (B x (nH*nW)) x nHeads x T x (unfold_wsize x unfold_wsize) x head_dim
+                    (k_pooled_k, v_pooled_k))
+                # k_pooled_k shape : [16, 4, 5, 45, 128]
+
+                # select valid unfolding index
+                if k > 0:
+                    (k_pooled_k, v_pooled_k) = map(
+                        lambda t: t[:, :, :, valid_ind_unfold_k],
+                        (k_pooled_k, v_pooled_k))
+
+                k_pooled_k = k_pooled_k.view(
+                    -1, self.num_heads, T * self.unfolds[k].kernel_size[0] *
+                    self.unfolds[k].kernel_size[1], C // self.num_heads)
+                v_pooled_k = v_pooled_k.view(
+                    -1, self.num_heads, T * self.unfolds[k].kernel_size[0] *
+                    self.unfolds[k].kernel_size[1], C // self.num_heads)
+
+                k_pooled += [k_pooled_k]
+                v_pooled += [v_pooled_k]
+
+            # k_all (v_all) shape : [16, 4, 5 * 210, 128]
+            k_all = torch.cat([k_rolled] + k_pooled, 2)
+            v_all = torch.cat([v_rolled] + v_pooled, 2)
+        else:
+            k_all = k_rolled
+            v_all = v_rolled
+
+        N = k_all.shape[-2]
+        q_windows = q_windows * self.scale
+        # B*nW, nHead, T*window_size*window_size, T*focal_window_size*focal_window_size
+        attn = (q_windows @ k_all.transpose(-2, -1))
+        # T * 45
+        window_area = T * self.window_size[0] * self.window_size[1]
+        # T * 165
+        window_area_rolled = k_rolled.shape[2]
+
+        if self.pool_method != "none" and self.focal_level > 1:
+            offset = window_area_rolled
+            for k in range(self.focal_level - 1):
+                # add attentional mask
+                # mask_all[1] shape [1, 16, T * 45]
+
+                bias = tuple((i + 2**k - 1) for i in self.focal_window)
+
+                if mask_all[k + 1] is not None:
+                    attn[:, :, :window_area, offset:(offset + (T*bias[0]*bias[1]))] = \
+                        attn[:, :, :window_area, offset:(offset + (T*bias[0]*bias[1]))] + \
+                        mask_all[k+1][:, :, None, None, :].repeat(
+                            attn.shape[0] // mask_all[k+1].shape[1], 1, 1, 1, 1).view(-1, 1, 1, mask_all[k+1].shape[-1])
+
+                offset += T * bias[0] * bias[1]
+
+        if mask_all[0] is not None:
+            nW = mask_all[0].shape[0]
+            attn = attn.view(attn.shape[0] // nW, nW, self.num_heads,
+                             window_area, N)
+            attn[:, :, :, :, :
+                 window_area] = attn[:, :, :, :, :window_area] + mask_all[0][
+                     None, :, None, :, :]
+            attn = attn.view(-1, self.num_heads, window_area, N)
+            attn = self.softmax(attn)
+        else:
+            attn = self.softmax(attn)
+
+        x = (attn @ v_all).transpose(1, 2).reshape(attn.shape[0], window_area,
+                                                   C)
+        x = self.proj(x)
+        return x
+
+
 class WindowAttention(nn.Module):
     """Temporal focal window attention
     """
@@ -523,7 +825,7 @@ class WindowAttention(nn.Module):
                                                           nWw).contiguous()
                 # B*T, C, nWh, nWw
                 k_pooled_k, v_pooled_k = qkv_pooled[1], qkv_pooled[2]
-                # k_pooled_k shape: [5, 512, 4, 4]
+                # k_pooled_k shape: [5, 512, 4, 4], i.e. [B*T, C, nWh, nWw] 空间池化后的window, 最后两个通道是window数量
                 # self.unfolds[k](k_pooled_k) shape: [5, 23040 (512 * 5 * 9 ), 16]
 
                 (k_pooled_k, v_pooled_k) = map(
@@ -536,7 +838,8 @@ class WindowAttention(nn.Module):
                         num_heads).permute(0, 3, 1, 2, 4).contiguous(),
                     # (B x (nH*nW)) x nHeads x T x (unfold_wsize x unfold_wsize) x head_dim
                     (k_pooled_k, v_pooled_k))
-                # k_pooled_k shape : [16, 4, 5, 45, 128]
+                # k_pooled_k shape : [16, 4, 5, 45, 128],
+                # i.e. [B * nWh * nWw, head, T, sh * sw, C // head], sh和sw是window的尺寸(5*9)
 
                 # select valid unfolding index
                 if k > 0:
@@ -554,7 +857,8 @@ class WindowAttention(nn.Module):
                 k_pooled += [k_pooled_k]
                 v_pooled += [v_pooled_k]
 
-            # k_all (v_all) shape : [16, 4, 5 * 210, 128]
+            # k_all (v_all) shape : [16, 4, 5 * 210, 128], i.e. [B * nWh * nWw, head, k_rolled + k_pooled, C // head]
+            # k_pooled : [B * nWh * nWw, head, T * sh * sw, C // head]
             k_all = torch.cat([k_rolled] + k_pooled, 2)
             v_all = torch.cat([v_rolled] + v_pooled, 2)
         else:
@@ -609,7 +913,7 @@ class WindowAttentionMem(nn.Module):
     def __init__(self, dim, expand_size, window_size, focal_window,
                  focal_level, num_heads, qkv_bias, pool_method,
                  memory, max_mem_len, compression_factor, mem_pool, store_lf, align_cache, sub_token_align, sub_factor,
-                 cross_att, time_att, time_deco):
+                 cross_att, time_att, time_deco, temp_focal):
 
         super().__init__()
         self.dim = dim
@@ -630,6 +934,7 @@ class WindowAttentionMem(nn.Module):
         self.cross_att = cross_att
         self.time_att = time_att
         self.time_deco = time_deco
+        self.temp_focal = temp_focal
 
         if any(i > 0 for i in self.expand_size) and focal_level > 0:
             # get mask for rolled k and rolled v
@@ -698,14 +1003,26 @@ class WindowAttentionMem(nn.Module):
 
                 if self.cross_att:
                     # 使用cross attention对齐记忆缓存和当前帧
-                    self.cm_proj = nn.Linear(dim, dim)
-
                     # 将记忆查询输出和当前帧的输出融合
                     self.fusion_proj = nn.Linear(2 * dim, dim)
+                    if not self.temp_focal:
+                        # 使用标准的attention
+                        self.cm_proj = nn.Linear(dim, dim)
 
-                    if self.time_deco:
-                        # 解耦时间和空间注意力
-                        self.cm_proj_t = nn.Linear(dim, dim)
+                        if self.time_deco:
+                            # 解耦时间和空间注意力
+                            self.cm_proj_t = nn.Linear(dim, dim)
+
+                    elif self.temp_focal:
+                        # 使用temp focal cross attention
+                        self.cf_att = CrossFocalAttention(dim,
+                                                          expand_size=self.expand_size,
+                                                          window_size=self.window_size,
+                                                          focal_window=focal_window,
+                                                          focal_level=focal_level,
+                                                          num_heads=num_heads,
+                                                          qkv_bias=qkv_bias,
+                                                          pool_method=pool_method)
 
             else:
                 # memory机制的含参数运算层-[基于池化的压缩]
@@ -852,23 +1169,7 @@ class WindowAttentionMem(nn.Module):
 
                         else:
                             # 信息将额外在T维度流动
-                            if not self.time_deco:
-                                # 不解耦时间和空间
-                                q = q.reshape(B, self.num_heads, T * nH * nW, C // self.num_heads).contiguous()
-                                cm_k = cm_k.reshape(B, self.num_heads, T * nH * nW, C // self.num_heads).contiguous()
-                                cm_v = cm_v.reshape(B, self.num_heads, T * nH * nW, C // self.num_heads).contiguous()
-                                cm_attn = (q @ cm_k.transpose(-2, -1)) * self.scale
-                                cm_attn = cm_attn.softmax(dim=-1)
-                                cm_x = (cm_attn @ cm_v).transpose(1, 2).reshape(B * T, nH * nW, C)
-                                cm_x = self.cm_proj(cm_x)
-
-                                # 恢复原来的shape
-                                q = q.reshape(B, T, nH, nW, C).contiguous()
-                                cm_k = cm_k.reshape(B, T, nH, nW, C).contiguous()
-                                cm_v = cm_v.reshape(B, T, nH, nW, C).contiguous()
-
-                                # 除了解耦的，前面两个版本的qkv shape变换都需要检查
-                            else:
+                            if self.time_deco:
                                 # 解耦时间和空间注意力
                                 # 时间注意力
                                 q = q.permute(0, 2, 3, 1, 4).reshape(B * nH * nW, T, C // self.num_heads, self.num_heads)\
@@ -905,6 +1206,27 @@ class WindowAttentionMem(nn.Module):
 
                                 # 暂时只使用相加融合两次查询
                                 cm_x += cm_x_t
+
+                            elif self.temp_focal:
+                                # 基于temporal focal attention实现时空记忆聚合
+                                cm_x = self.cf_att(qkv=[q, cm_k, cm_v], mask_all=mask_all)
+
+                            else:
+                                # 不解耦时间和空间
+                                q = q.reshape(B, self.num_heads, T * nH * nW, C // self.num_heads).contiguous()
+                                cm_k = cm_k.reshape(B, self.num_heads, T * nH * nW, C // self.num_heads).contiguous()
+                                cm_v = cm_v.reshape(B, self.num_heads, T * nH * nW, C // self.num_heads).contiguous()
+                                cm_attn = (q @ cm_k.transpose(-2, -1)) * self.scale
+                                cm_attn = cm_attn.softmax(dim=-1)
+                                cm_x = (cm_attn @ cm_v).transpose(1, 2).reshape(B * T, nH * nW, C)
+                                cm_x = self.cm_proj(cm_x)
+
+                                # 恢复原来的shape
+                                q = q.reshape(B, T, nH, nW, C).contiguous()
+                                cm_k = cm_k.reshape(B, T, nH, nW, C).contiguous()
+                                cm_v = cm_v.reshape(B, T, nH, nW, C).contiguous()
+
+                                # 除了解耦的，前面两个版本的qkv shape变换都需要检查
 
                         k_temp = k  # debug
 
@@ -1419,6 +1741,7 @@ class TemporalFocalTransformerBlock(nn.Module):
         cross_att (bool): Whether use cross attention to align memory and current token.
         time_att (bool): If True, use cross attention to align memory and current token additionally on T dimension.
         time_deco (bool): If True, the Time and Space Cross Att. will be decoupled to reduce cost.
+        temp_focal (bool): If True, use temporal focal att to cross att time and space.
     """
     def __init__(self,
                  dim,
@@ -1443,7 +1766,8 @@ class TemporalFocalTransformerBlock(nn.Module):
                  sub_factor=1,
                  cross_att=False,
                  time_att=False,
-                 time_deco=False):
+                 time_deco=False,
+                 temp_focal=False):
         super().__init__()
         self.dim = dim
         self.num_heads = num_heads
@@ -1502,7 +1826,8 @@ class TemporalFocalTransformerBlock(nn.Module):
                                            sub_factor=sub_factor,
                                            cross_att=cross_att,
                                            time_att=time_att,
-                                           time_deco=time_deco)
+                                           time_deco=time_deco,
+                                           temp_focal=temp_focal)
 
         self.norm2 = norm_layer(dim)
         self.mlp = FusionFeedForward(dim, n_vecs=n_vecs, t2t_params=t2t_params)

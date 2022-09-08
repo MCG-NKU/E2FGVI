@@ -139,7 +139,7 @@ class InpaintGenerator(BaseNetwork):
                  token_fusion=False, token_fusion_simple=False, fusion_skip_connect=False,
                  memory=False, max_mem_len=8, compression_factor=4, mem_pool=False, store_lf=False, align_cache=False,
                  sub_token_align=False, sub_factor=1, half_memory=False, last_memory=False,
-                 cross_att=False, time_att=False, time_deco=False):
+                 cross_att=False, time_att=False, time_deco=False, temp_focal=False):
         super(InpaintGenerator, self).__init__()
         # channel = 256   # default
         # hidden = 512    # default
@@ -175,6 +175,7 @@ class InpaintGenerator(BaseNetwork):
         cross_att = cross_att                       # 如果为True，使用cross attention融合记忆与当前帧
         time_att = time_att                         # 如果为True，使用cross attention额外在T维度融合记忆与当前帧
         time_deco = time_deco                       # 如果为True，则cross attention会把时间和空间解耦
+        temp_focal = temp_focal                     # 如果为True，则cross attention的时空记忆聚合基于temp focal att实现
 
         # encoder
         # self.encoder = Encoder()    # default
@@ -327,7 +328,8 @@ class InpaintGenerator(BaseNetwork):
                                                       sub_factor=sub_factor,
                                                       cross_att=cross_att,
                                                       time_att=time_att,
-                                                      time_deco=time_deco),)
+                                                      time_deco=time_deco,
+                                                      temp_focal=temp_focal),)
                 elif half_memory:
                     # 只有一半的层有记忆
                     if (i + 1) % 2 == 0:
@@ -351,7 +353,8 @@ class InpaintGenerator(BaseNetwork):
                                                           sub_factor=sub_factor,
                                                           cross_att=cross_att,
                                                           time_att=time_att,
-                                                          time_deco=time_deco), )
+                                                          time_deco=time_deco,
+                                                          temp_focal=temp_focal), )
                     else:
                         # 奇数层没有记忆
                         blocks.append(
@@ -368,46 +371,27 @@ class InpaintGenerator(BaseNetwork):
                     # 只有最后一层有记忆力
                     if (i + 1) == depths:
                         # 最后一层有记忆力
-                        if not cross_att:
-                            blocks.append(
-                                TemporalFocalTransformerBlock(dim=hidden,
-                                                              num_heads=num_heads[i],
-                                                              window_size=window_size[i],
-                                                              focal_level=focal_levels[i],
-                                                              focal_window=focal_windows[i],
-                                                              n_vecs=n_vecs,
-                                                              t2t_params=t2t_params,
-                                                              pool_method=pool_method,
-                                                              memory=self.memory,
-                                                              max_mem_len=max_mem_len,
-                                                              compression_factor=compression_factor,
-                                                              mem_pool=mem_pool,
-                                                              store_lf=store_lf,
-                                                              align_cache=align_cache,
-                                                              sub_token_align=sub_token_align,
-                                                              sub_factor=sub_factor), )
-                        else:
-                            # 最后一层有记忆且使用cross attention融合记忆力
-                            blocks.append(
-                                TemporalFocalTransformerBlock(dim=hidden,
-                                                              num_heads=num_heads[i],
-                                                              window_size=window_size[i],
-                                                              focal_level=focal_levels[i],
-                                                              focal_window=focal_windows[i],
-                                                              n_vecs=n_vecs,
-                                                              t2t_params=t2t_params,
-                                                              pool_method=pool_method,
-                                                              memory=self.memory,
-                                                              max_mem_len=max_mem_len,
-                                                              compression_factor=compression_factor,
-                                                              mem_pool=mem_pool,
-                                                              store_lf=store_lf,
-                                                              align_cache=align_cache,
-                                                              sub_token_align=sub_token_align,
-                                                              sub_factor=sub_factor,
-                                                              cross_att=cross_att,
-                                                              time_att=time_att,
-                                                              time_deco=time_deco), )
+                        blocks.append(
+                            TemporalFocalTransformerBlock(dim=hidden,
+                                                          num_heads=num_heads[i],
+                                                          window_size=window_size[i],
+                                                          focal_level=focal_levels[i],
+                                                          focal_window=focal_windows[i],
+                                                          n_vecs=n_vecs,
+                                                          t2t_params=t2t_params,
+                                                          pool_method=pool_method,
+                                                          memory=self.memory,
+                                                          max_mem_len=max_mem_len,
+                                                          compression_factor=compression_factor,
+                                                          mem_pool=mem_pool,
+                                                          store_lf=store_lf,
+                                                          align_cache=align_cache,
+                                                          sub_token_align=sub_token_align,
+                                                          sub_factor=sub_factor,
+                                                          cross_att=cross_att,
+                                                          time_att=time_att,
+                                                          time_deco=time_deco,
+                                                          temp_focal=temp_focal), )
                     else:
                         # 前面的层没有记忆
                         blocks.append(

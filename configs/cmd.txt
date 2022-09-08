@@ -558,9 +558,24 @@ CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/
 All average forward run time: (0.050231) per frame[本地3090]
 没什么亮点，C通道线性层聚合这条路没必要再坚持走下去了，到这里就行了。后面主要探索attention
 
-# 使用cross attention代替线性层聚合记忆力 [3090Ti] 大约需要41.5h
+# 使用cross attention代替线性层聚合记忆力 [已完成] 大约需要41h
 # 目前仅实现了对于非局部帧和局部帧都存储的缓存机制进行注意力查询，查询的是残差量，参考MixFormer
 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-cs.json
+默认的半滑窗逻辑测试：
+python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-cs/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.71/0.9397/0.234
+All average forward run time: (0.075480) per frame[3090Ti]
+好像没有非常好，信息已经在空间尺度流动了啊。
+序列测试：
+python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-cs/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.04/0.9400/0.230
+All average forward run time: (0.023377) per frame[3090Ti]
+信息在空间尺度流通以后，模型用很快的速度刷到了和原来推理两次/三次接近的精度！但是依然没有超过
+序列测试x2：
+python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-cs/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.28/0.9424/0.220
+All average forward run time: (0.045485) per frame[3090Ti]
+信息在空间尺度流动后，我们每帧推理1次或两次精度就可以超过之前的模型了！当然，对于记忆力的定制越多，对于测试逻辑的改变可能就越敏感。
 
 # 实现T-cross attention [tmux1]
 CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT.json
@@ -581,4 +596,9 @@ CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T1C1-Las
 
 # 实现基于窗口cross attention的记忆力聚合 [未开始]
 
+# 实现基于temporal focal cross att的时空记忆聚合 [未开始]
+# 这里直接对记忆缓存的kv进行池化来完成global att的编码
+python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-tf.json
+
 # 实现对于attention更长的记忆力聚合，在att前先用线性层聚合缓存 [未开始]
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T2C2-LastMem-csT-deco.json

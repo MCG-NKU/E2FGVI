@@ -163,6 +163,12 @@ class Trainer:
                 else:
                     self.time_deco = False
 
+                # 是否在聚合时空记忆时使用temporal focal attention
+                if config['model']['temp_focal'] != 0:
+                    self.temp_focal = True
+                else:
+                    self.temp_focal = False
+
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,
                     token_fusion_simple=self.token_fusion_simple, fusion_skip_connect=self.fusion_skip_connect,
@@ -170,7 +176,8 @@ class Trainer:
                     compression_factor=config['model']['compression_factor'], mem_pool=self.mem_pool,
                     store_lf=self.store_lf, align_cache=self.align_cache, sub_token_align=self.sub_token_align,
                     sub_factor=self.sub_factor, half_memory=self.half_memory, last_memory=self.last_memory,
-                    cross_att=self.cross_att, time_att=self.time_att, time_deco=self.time_deco)
+                    cross_att=self.cross_att, time_att=self.time_att, time_deco=self.time_deco,
+                    temp_focal=self.temp_focal)
             else:
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,
