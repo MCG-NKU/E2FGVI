@@ -121,6 +121,8 @@ CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --dataset davis --dat
 [250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.06/0.9408/0.224     # PSNR提升0.44
 All average forward run time: (0.069357) per frame [本地3090]
 All average forward run time: (0.047785) per frame [矩池云3090]
+重新测试速度
+All average forward run time: (0.046712) per frame [矩池云3090]
 
 # 训练lite-MFN bs2 3090单卡 250k back光流真对齐 maskflownetS 光流引导patch embedding [已完成] 需要58.3h
 CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_lite-MFN-flow-guide.json
@@ -484,14 +486,99 @@ All average forward run time: (0.044951) per frame [3090Ti]
 虽然记忆时长很短压缩指数也很高，但是精度表现已经超过了之前最复杂的记忆模型
 综合T2C1-LF以及T2C1的模型表现来看，只存储局部帧，并且对于记忆进行进一步压缩是更好的选择，记忆时长也不宜过长，总之，应该让当前帧的结果(特征)成为主流，防止误差的累计
 
-# 为了找到记忆模型精度下降的原因，训练记忆时长1，只存储局部帧且压缩8的lite-MFN作为对比 [3090Ti] 需要h
+# 为了找到记忆模型精度下降的原因，训练记忆时长1，只存储局部帧且压缩8的lite-MFN作为对比 [已完成] 需要41.5h
 python train.py -c configs/ablation_lite-MFN-mem-T1C8-LF.json
+默认的半滑窗逻辑测试：
+python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C8-LF/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory
+[250k, davis] Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.41/0.9381/0.237
+All average forward run time: (0.075652) per frame [3090Ti]
+最短的记忆力甚至不如T2C8？？？
+序列测试：
+python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C8-LF/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.75/0.9378/0.224
+All average forward run time: (0.023226) per frame[3090Ti]
+序列测试x2：
+python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C8-LF/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.97/0.9400/0.214
+All average forward run time: (0.045340) per frame [3090Ti]
+最小的扰动，最差的结果。。。
 
-# 为了找到记忆模型精度下降的原因，训练记忆时长1，只存储局部帧且压缩8 token对齐 的lite-MFN作为对比 [tmux0] 需要h
+# 为了找到记忆模型精度下降的原因，训练记忆时长1，只存储局部帧且压缩8 token对齐 的lite-MFN作为对比 [已完成] 需要56h
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T1C8-LF-align.json
+默认的半滑窗逻辑测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C8-LF-align/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.66/0.9398/0.246
+All average forward run time: (0.057382) per frame[矩池云3090]
+比不对准强，但是还是很差。
+序列测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C8-LF-align/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.69/0.9375/0.227
+All average forward run time: (0.026004) per frame[矩池云3090]
+序列测试还不如不对齐，真的无语。
+序列测试x2：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C8-LF-align/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.95/0.9399/0.217
+All average forward run time: (0.053937) per frame
+[矩池云3090]
+序列测试不如不对齐。。。
 
-# 为了找到记忆模型精度下降的原因，训练记忆时长1，只存储局部帧且压缩8 sub-token 4 对齐 的lite-MFN作为对比 [tmux1] 需要h
+# 为了找到记忆模型精度下降的原因，训练记忆时长1，只存储局部帧且压缩8 sub-token 4 对齐 的lite-MFN作为对比 [已完成] 需要58h
 CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_lite-MFN-mem-T1C8-LF-align-sub4.json
+默认的半滑窗逻辑测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C8-LF-align-sub4/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.73/0.9406/0.221
+All average forward run time: (0.056840) per frame [矩池云3090]
+比不对齐和对齐单通道强，但是还是很差。
+序列测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C8-LF-align-sub4/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.80/0.9390/0.227
+All average forward run time: (0.027552) per frame [矩池云3090]
+比不对齐和对齐单通道强，但是还是很差，因为信息的流动性还是不够啊！
+序列测试x2：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C8-LF-align-sub4/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.97/0.9407/0.219
+All average forward run time: (0.054610) per frame[矩池云3090]
+比对齐单通道好一点，但是和不对齐差不多，乌鱼子。
 
-# 为了找到记忆模型精度下降的原因，训练记忆时长1，只存储局部帧且压缩8的lite-MFN作为对比，只在最后一层记忆 [未开始] 需要h
+# 为了找到记忆模型精度下降的原因，训练记忆时长1，只存储局部帧且压缩8的lite-MFN作为对比，只在最后一层记忆 [已完成] 需要44.5h
 python train.py -c configs/ablation_lite-MFN-mem-T1C8-LF-LastMem.json
+默认的半滑窗逻辑测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C8-LF-LastMem/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.45/0.9388/0.238
+All average forward run time: (0.080145) per frame[本地3090]
+比T1C8-LF强一点点，但是也很差。
+序列测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C8-LF-LastMem/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.73/0.9386/0.241
+All average forward run time: (0.025537) per frame[本地3090]
+不咋样，说到底还是信息通路没打通。
+序列测试x2：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C8-LF-LastMem/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.00/0.9413/0.224
+All average forward run time: (0.050231) per frame[本地3090]
+没什么亮点，C通道线性层聚合这条路没必要再坚持走下去了，到这里就行了。后面主要探索attention
+
+# 使用cross attention代替线性层聚合记忆力 [3090Ti] 大约需要41.5h
+# 目前仅实现了对于非局部帧和局部帧都存储的缓存机制进行注意力查询，查询的是残差量，参考MixFormer
+python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-cs.json
+
+# 实现T-cross attention [tmux1]
+CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT.json
+
+# 实现T-cross attention 时间和空间注意力解耦[tmux0]
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco.json
+
+# 实现T-N-记忆Linear聚合 [未开始]
+
+# 测试基于 cross attention 记忆力聚合的训练显存消耗
+# 基于本地3090测试
+1.large-MFN-T1C1-LastMem-csT-deco 可以单卡bs2正常训练
+2.large-MFN-T1C1-LastMem-csT 可以单卡bs2正常训练 但是速度非常非常慢
+3.large-MFN-T1C1-HalfMem-csT 炸裂，不可以训练
+4.large-MFN-T1C1-HalfMem-csT-deco 可以单卡bs2正常训练
+5.large-MFN-T1C1-csT-deco 所有层都有记忆力，可以单卡bs2正常训练 但是速度非常非常慢
+看来时空解耦进行attention非常有必要。
+
+# 实现基于窗口cross attention的记忆力聚合 [未开始]
+
+# 实现对于attention更长的记忆力聚合，在att前先用线性层聚合缓存 [未开始]

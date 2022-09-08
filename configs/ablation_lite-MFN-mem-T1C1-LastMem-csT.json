@@ -35,7 +35,8 @@
         "half_memory": 0,
         "last_memory": 1,
         "cross_att": 1,
-        "time_att": 1
+        "time_att": 1,
+        "time_deco": 0
     },
     "trainer": {
         "type": "Adam",

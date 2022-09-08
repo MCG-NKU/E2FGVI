@@ -324,7 +324,10 @@ class InpaintGenerator(BaseNetwork):
                                                       store_lf=store_lf,
                                                       align_cache=align_cache,
                                                       sub_token_align=sub_token_align,
-                                                      sub_factor=sub_factor),)
+                                                      sub_factor=sub_factor,
+                                                      cross_att=cross_att,
+                                                      time_att=time_att,
+                                                      time_deco=time_deco),)
                 elif half_memory:
                     # 只有一半的层有记忆
                     if (i + 1) % 2 == 0:
@@ -345,7 +348,10 @@ class InpaintGenerator(BaseNetwork):
                                                           store_lf=store_lf,
                                                           align_cache=align_cache,
                                                           sub_token_align=sub_token_align,
-                                                          sub_factor=sub_factor), )
+                                                          sub_factor=sub_factor,
+                                                          cross_att=cross_att,
+                                                          time_att=time_att,
+                                                          time_deco=time_deco), )
                     else:
                         # 奇数层没有记忆
                         blocks.append(
