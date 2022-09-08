@@ -596,7 +596,7 @@ CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T1C1-Las
 
 # 实现基于窗口cross attention的记忆力聚合 [未开始]
 
-# 实现基于temporal focal cross att的时空记忆聚合 [未开始]
+# 实现基于temporal focal cross att的时空记忆聚合 [3090] 约需要49.5h
 # 这里直接对记忆缓存的kv进行池化来完成global att的编码
 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-tf.json
 
