@@ -169,6 +169,12 @@ class Trainer:
                 else:
                     self.temp_focal = False
 
+                # 是否在聚合时空记忆时使用cswin attention
+                if config['model']['cs_win'] != 0:
+                    self.cs_win = True
+                else:
+                    self.cs_win = False
+
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,
                     token_fusion_simple=self.token_fusion_simple, fusion_skip_connect=self.fusion_skip_connect,
@@ -177,7 +183,7 @@ class Trainer:
                     store_lf=self.store_lf, align_cache=self.align_cache, sub_token_align=self.sub_token_align,
                     sub_factor=self.sub_factor, half_memory=self.half_memory, last_memory=self.last_memory,
                     cross_att=self.cross_att, time_att=self.time_att, time_deco=self.time_deco,
-                    temp_focal=self.temp_focal)
+                    temp_focal=self.temp_focal, cs_win=self.cs_win)
             else:
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,

@@ -139,7 +139,7 @@ class InpaintGenerator(BaseNetwork):
                  token_fusion=False, token_fusion_simple=False, fusion_skip_connect=False,
                  memory=False, max_mem_len=8, compression_factor=4, mem_pool=False, store_lf=False, align_cache=False,
                  sub_token_align=False, sub_factor=1, half_memory=False, last_memory=False,
-                 cross_att=False, time_att=False, time_deco=False, temp_focal=False):
+                 cross_att=False, time_att=False, time_deco=False, temp_focal=False, cs_win=False):
         super(InpaintGenerator, self).__init__()
         # channel = 256   # default
         # hidden = 512    # default
@@ -176,6 +176,7 @@ class InpaintGenerator(BaseNetwork):
         time_att = time_att                         # 如果为True，使用cross attention额外在T维度融合记忆与当前帧
         time_deco = time_deco                       # 如果为True，则cross attention会把时间和空间解耦
         temp_focal = temp_focal                     # 如果为True，则cross attention的时空记忆聚合基于temp focal att实现
+        cs_win = cs_win                             # 如果为True，则cross attention的时空记忆聚合基于cswin att实现
 
         # encoder
         # self.encoder = Encoder()    # default
@@ -329,7 +330,8 @@ class InpaintGenerator(BaseNetwork):
                                                       cross_att=cross_att,
                                                       time_att=time_att,
                                                       time_deco=time_deco,
-                                                      temp_focal=temp_focal),)
+                                                      temp_focal=temp_focal,
+                                                      cs_win=cs_win),)
                 elif half_memory:
                     # 只有一半的层有记忆
                     if (i + 1) % 2 == 0:
@@ -354,7 +356,8 @@ class InpaintGenerator(BaseNetwork):
                                                           cross_att=cross_att,
                                                           time_att=time_att,
                                                           time_deco=time_deco,
-                                                          temp_focal=temp_focal), )
+                                                          temp_focal=temp_focal,
+                                                          cs_win=cs_win), )
                     else:
                         # 奇数层没有记忆
                         blocks.append(
@@ -391,7 +394,8 @@ class InpaintGenerator(BaseNetwork):
                                                           cross_att=cross_att,
                                                           time_att=time_att,
                                                           time_deco=time_deco,
-                                                          temp_focal=temp_focal), )
+                                                          temp_focal=temp_focal,
+                                                          cs_win=cs_win), )
                     else:
                         # 前面的层没有记忆
                         blocks.append(

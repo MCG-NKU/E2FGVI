@@ -347,6 +347,166 @@ def window_reverse(windows, window_size, T, H, W):
     return x
 
 
+class TemporalLePEAttention(nn.Module):
+    """CSWin attention.
+        Revised by Hao:
+            Able to compute attention with non-square input.
+            Extend CSWin to Temporal-CSWin
+            temporal (bool): It True, extend CSWin to Temporal CSWin"""
+    def __init__(self, dim, resolution, idx, split_size=7, dim_out=None, num_heads=8, attn_drop=0., proj_drop=0.,
+                 qk_scale=None, temporal=False):
+        super().__init__()
+        self.dim = dim
+        self.dim_out = dim_out or dim
+        self.resolution = resolution
+        self.split_size = split_size
+        self.num_heads = num_heads
+        head_dim = dim // num_heads
+        # NOTE scale factor was wrong in my original version, can set manually to be compat with prev weights
+        self.scale = qk_scale or head_dim ** -0.5
+        if idx == -1:
+            H_sp, W_sp = self.resolution[0], self.resolution[1]
+        elif idx == 0:
+            H_sp, W_sp = self.resolution[0], self.split_size
+        elif idx == 1:
+            W_sp, H_sp = self.resolution[1], self.split_size
+        else:
+            print("ERROR MODE", idx)
+            exit(0)
+        self.H_sp = H_sp
+        self.W_sp = W_sp
+        stride = 1
+        self.get_v = nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1, groups=dim)
+
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.temporal = temporal
+        assert self.temporal == True, "Only Support Temporal CSWin Now."
+
+    def im2cswin(self, x):
+        B, N, C = x.shape
+        H = W = int(np.sqrt(N))
+        x = x.transpose(-2, -1).contiguous().view(B, C, H, W)
+        x = self.img2windows(x, self.H_sp, self.W_sp)
+        x = x.reshape(-1, self.H_sp * self.W_sp, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3).contiguous()
+        return x
+
+    def im2cswin_temporal(self, x):
+        B, T, H, W, C = x.shape
+        x = x.permute(0, 4, 1, 2, 3).contiguous()   # B C T H W
+        x = self.img2windows_temporal(x, self.H_sp, self.W_sp)  # B*H/H_sp*W/W_sp T*H_sp*W_sp C
+        x = x.reshape(-1, T * self.H_sp * self.W_sp, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3).contiguous()
+        return x
+
+    def img2windows_temporal(self, img, H_sp, W_sp):
+        """
+        img: B C T H W
+        """
+        B, C, T, H, W = img.shape
+        img_reshape = img.view(B, C, T, H // H_sp, H_sp, W // W_sp, W_sp)
+        img_perm = img_reshape.permute(0, 3, 5, 2, 4, 6, 1).contiguous().reshape(-1, T * H_sp * W_sp, C)
+        return img_perm
+
+    def img2windows(self, img, H_sp, W_sp):
+        """
+        img: B C H W
+        """
+        B, C, H, W = img.shape
+        img_reshape = img.view(B, C, H // H_sp, H_sp, W // W_sp, W_sp)
+        img_perm = img_reshape.permute(0, 2, 4, 3, 5, 1).contiguous().reshape(-1, H_sp * W_sp, C)
+        return img_perm
+
+    def windows2img(self, img_splits_hw, H_sp, W_sp, H, W):
+        """
+        img_splits_hw: B' H W C
+        """
+        B = int(img_splits_hw.shape[0] / (H * W / H_sp / W_sp))
+
+        img = img_splits_hw.view(B, H // H_sp, W // W_sp, H_sp, W_sp, -1)
+        img = img.permute(0, 1, 3, 2, 4, 5).contiguous().view(B, H, W, -1)
+        return img
+
+    def get_lepe(self, x, func):
+        B, N, C = x.shape
+        H = W = int(np.sqrt(N))
+        x = x.transpose(-2, -1).contiguous().view(B, C, H, W)
+
+        H_sp, W_sp = self.H_sp, self.W_sp
+        x = x.view(B, C, H // H_sp, H_sp, W // W_sp, W_sp)
+        x = x.permute(0, 2, 4, 1, 3, 5).contiguous().reshape(-1, C, H_sp, W_sp)  ### B', C, H', W'
+
+        lepe = func(x)  ### B', C, H', W'
+        lepe = lepe.reshape(-1, self.num_heads, C // self.num_heads, H_sp * W_sp).permute(0, 1, 3, 2).contiguous()
+
+        x = x.reshape(-1, self.num_heads, C // self.num_heads, self.H_sp * self.W_sp).permute(0, 1, 3, 2).contiguous()
+        return x, lepe
+
+    def get_lepe_temporal(self, x, func):
+        B, T, H, W, C = x.shape
+        x = x.permute(0, 1, 4, 2, 3).contiguous().reshape(B * T, C, H, W)   # B*T C H W
+
+        H_sp, W_sp = self.H_sp, self.W_sp
+        x = x.view(B, T, C, H // H_sp, H_sp, W // W_sp, W_sp)
+        x = x.permute(0, 3, 5, 1, 2, 4, 6).contiguous().reshape(-1, C, H_sp, W_sp)  # B'*T, C, H', W'
+
+        lepe = func(x)  ### B'*T, C, H', W'
+        lepe = lepe.reshape(B * H // H_sp * W // W_sp, T, self.num_heads, C // self.num_heads, H_sp * W_sp)\
+            .permute(0, 2, 1, 4, 3).contiguous().reshape(-1, self.num_heads, T * H_sp * W_sp, C // self.num_heads)
+        # lepe: B' head T*H_sp*W_sp C/head
+
+        x = x.reshape(B * H // H_sp * W // W_sp, T, self.num_heads, C // self.num_heads, self.H_sp * self.W_sp)\
+            .permute(0, 2, 1, 4, 3).contiguous().reshape(-1, self.num_heads, T * H_sp * W_sp, C // self.num_heads)
+        # x: B' head T*Hsp*Wsp C/head
+        return x, lepe
+
+    def windows2img_temporal(self, img_splits_hw, T, H_sp, W_sp, H, W):
+        """
+        img_splits_hw: B' THW C
+        img: B T H W C
+        """
+        B = int(img_splits_hw.shape[0] / (H * W / H_sp / W_sp))
+
+        img = img_splits_hw.view(B, H // H_sp, W // W_sp, T, H_sp, W_sp, -1)
+        img = img.permute(0, 3, 1, 4, 2, 5, 6).contiguous().view(B, T, H, W, -1)
+        # img = img.permute(0, 1, 3, 2, 4, 5).contiguous().view(B, H, W, -1)
+        return img
+
+    def forward(self, qkv):
+        """
+        q,k,v: B, T, H, W, C
+        x: B L C
+        """
+        q, k, v = qkv[0], qkv[1], qkv[2]
+
+        ### Img2Window
+        # H = self.resolution[0]
+        # W = self.resolution[1]
+        B, T, H, W, C = q.shape
+        # B, L, C = q.shape
+        # assert L == H * W, "flatten img_tokens has wrong size"
+
+        # q = self.im2cswin(q)
+        # k = self.im2cswin(k)
+        # v, lepe = self.get_lepe(v, self.get_v)
+        q = self.im2cswin_temporal(q)
+        k = self.im2cswin_temporal(k)
+        v, lepe = self.get_lepe_temporal(v, self.get_v)
+
+        q = q * self.scale
+        attn = (q @ k.transpose(-2, -1))  # B head N C @ B head C N --> B head N N
+        attn = nn.functional.softmax(attn, dim=-1, dtype=attn.dtype)
+        attn = self.attn_drop(attn)
+
+        x = (attn @ v) + lepe
+        # x = x.transpose(1, 2).reshape(-1, self.H_sp * self.W_sp, C)  # B head N N @ B head N C
+        x = x.transpose(1, 2).reshape(-1, T * self.H_sp * self.W_sp, C)
+
+        ### Window2Img
+        # x = self.windows2img(x, self.H_sp, self.W_sp, H, W).view(B, -1, C)  # B H' W' C
+        x = self.windows2img_temporal(x, T, self.H_sp, self.W_sp, H, W).view(B, -1, C)  # B H' W' C
+
+        return x
+
+
 class CrossFocalAttention(nn.Module):
     """Cross Temporal focal window attention based on t-focal window attention of e2fgvi."""
     def __init__(self, dim, expand_size, window_size, focal_window,
@@ -913,7 +1073,7 @@ class WindowAttentionMem(nn.Module):
     def __init__(self, dim, expand_size, window_size, focal_window,
                  focal_level, num_heads, qkv_bias, pool_method,
                  memory, max_mem_len, compression_factor, mem_pool, store_lf, align_cache, sub_token_align, sub_factor,
-                 cross_att, time_att, time_deco, temp_focal):
+                 cross_att, time_att, time_deco, temp_focal, cs_win):
 
         super().__init__()
         self.dim = dim
@@ -935,6 +1095,7 @@ class WindowAttentionMem(nn.Module):
         self.time_att = time_att
         self.time_deco = time_deco
         self.temp_focal = temp_focal
+        self.cs_win = cs_win
 
         if any(i > 0 for i in self.expand_size) and focal_level > 0:
             # get mask for rolled k and rolled v
@@ -1015,7 +1176,7 @@ class WindowAttentionMem(nn.Module):
 
                     # 将记忆查询输出和当前帧的输出融合
                     self.fusion_proj = nn.Linear(2 * dim, dim)
-                    if not self.temp_focal:
+                    if not (self.temp_focal or self.cs_win):
                         # 使用标准的attention
                         self.cm_proj = nn.Linear(dim, dim)
 
@@ -1033,6 +1194,18 @@ class WindowAttentionMem(nn.Module):
                                                           num_heads=num_heads,
                                                           qkv_bias=qkv_bias,
                                                           pool_method=pool_method)
+                    elif self.cs_win:
+                        # 使用cs win attention
+                        window_stride = 4  # 每个window在两个方向上占用了多少个token
+                        split_size = 1  # 条形窗口的宽度
+                        patches_resolution = [self.window_size[0] * window_stride,
+                                              self.window_size[1] * window_stride]     # token的纵向和横向的个数
+                        self.cs_att = nn.ModuleList([
+                            TemporalLePEAttention(dim//2, resolution=patches_resolution, idx=i,
+                                                  split_size=split_size, num_heads=num_heads//2, dim_out=dim//2,
+                                                  qk_scale=None, attn_drop=0., proj_drop=0., temporal=True)
+                            for i in range(0, 2)])      # 两个，一个横向一个纵向
+                        self.cs_proj = nn.Linear(dim, dim)
 
             else:
                 # memory机制的含参数运算层-[基于池化的压缩]
@@ -1250,6 +1423,17 @@ class WindowAttentionMem(nn.Module):
                             elif self.temp_focal:
                                 # 基于temporal focal attention实现时空记忆聚合
                                 cm_x = self.cf_att(qkv=[q, mem_k, mem_v], mask_all=mask_all)
+
+                            elif self.cs_win:
+                                # 基于cswin attention聚合时空记忆和当前迭代
+                                cm_x1 = self.cs_att[0](qkv=[q[:, :, :, :, :C // 2],
+                                                            mem_k[:, :, :, :, :C // 2],
+                                                            mem_v[:, :, :, :, :C // 2]])
+                                cm_x2 = self.cs_att[1](qkv=[q[:, :, :, :, C // 2:],
+                                                            mem_k[:, :, :, :, C // 2:],
+                                                            mem_v[:, :, :, :, C // 2:]])
+                                cm_x = torch.cat([cm_x1, cm_x2], dim=2)
+                                cm_x = self.cs_proj(cm_x)
 
                             else:
                                 # 不解耦时间和空间
@@ -1782,6 +1966,7 @@ class TemporalFocalTransformerBlock(nn.Module):
         time_att (bool): If True, use cross attention to align memory and current token additionally on T dimension.
         time_deco (bool): If True, the Time and Space Cross Att. will be decoupled to reduce cost.
         temp_focal (bool): If True, use temporal focal att to cross att time and space.
+        cs_win (bool): If True, use cswin att to cross att time and space.
     """
     def __init__(self,
                  dim,
@@ -1807,7 +1992,8 @@ class TemporalFocalTransformerBlock(nn.Module):
                  cross_att=False,
                  time_att=False,
                  time_deco=False,
-                 temp_focal=False):
+                 temp_focal=False,
+                 cs_win=False):
         super().__init__()
         self.dim = dim
         self.num_heads = num_heads
@@ -1867,7 +2053,8 @@ class TemporalFocalTransformerBlock(nn.Module):
                                            cross_att=cross_att,
                                            time_att=time_att,
                                            time_deco=time_deco,
-                                           temp_focal=temp_focal)
+                                           temp_focal=temp_focal,
+                                           cs_win=cs_win)
 
         self.norm2 = norm_layer(dim)
         self.mlp = FusionFeedForward(dim, n_vecs=n_vecs, t2t_params=t2t_params)
