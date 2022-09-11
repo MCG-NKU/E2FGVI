@@ -678,5 +678,10 @@ CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T4C1-Las
 # 缓存长了，压缩比也上升会怎么样呢
 CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_lite-MFN-mem-T4C4-LastMem-csT-deco.json
 
-# 实现基于cs win cross att的时空记忆聚合 [3090] 需要h
+# 实现基于cs win cross att的时空记忆聚合 [3090] 约需要51h
+# 该版本将T维度和空间维度合并进行3D attention，前几个epoch似乎很慢，后面突然快起来了。。。
 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-cs.json
+
+# 实现基于cs win cross att的时空记忆聚合 [未开始] 约需要h
+# 通过解耦时间和空间进行3D attention，相当于用cs win替代deco版本里的空间attention
+python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-cs.json
