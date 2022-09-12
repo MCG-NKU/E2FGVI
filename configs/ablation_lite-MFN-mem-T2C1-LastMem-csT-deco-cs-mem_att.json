@@ -39,7 +39,8 @@
         "time_deco": 1,
         "temp_focal": 0,
         "cs_win": 1,
-        "mem_att": 1
+        "mem_att": 1,
+        "cs_focal": 0
     },
     "trainer": {
         "type": "Adam",
