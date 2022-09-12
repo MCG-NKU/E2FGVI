@@ -352,9 +352,11 @@ class TemporalLePEAttention(nn.Module):
         Revised by Hao:
             1. Able to compute attention with non-square input.
             2. Extend CSWin to Temporal-CSWin.
-            temporal (bool): It True, extend CSWin to Temporal CSWin"""
+            3. Enhance CSWin with global window attention with pooling and focal.
+            temporal (bool): It True, extend CSWin to Temporal CSWin
+            cs_focal (bool): It True, extend CSWin with global window attention with pooling and focal"""
     def __init__(self, dim, resolution, idx, split_size=7, dim_out=None, num_heads=8, attn_drop=0., proj_drop=0.,
-                 qk_scale=None, temporal=False):
+                 qk_scale=None, temporal=False, cs_focal=False):
         super().__init__()
         self.dim = dim
         self.dim_out = dim_out or dim
@@ -379,7 +381,38 @@ class TemporalLePEAttention(nn.Module):
 
         self.attn_drop = nn.Dropout(attn_drop)
         self.temporal = temporal
-        # assert self.temporal == True, "Only Support Temporal CSWin Now."
+        self.cs_focal = cs_focal
+
+        if self.cs_focal:
+            # 用于池化记忆kv的层
+            # 使用线性层池化
+            self.pool_layers = nn.ModuleList()
+            window_size_glo = [self.H_sp, self.W_sp]
+            self.pool_layers.append(
+                nn.Linear(window_size_glo[0] * window_size_glo[1], 1))
+            self.pool_layers[-1].weight.data.fill_(
+                1. / (window_size_glo[0] * window_size_glo[1]))
+            self.pool_layers[-1].bias.data.fill_(0)
+
+            # 展开函数
+            self.unfolds = nn.ModuleList()
+
+            # build relative position bias between local patch and pooled windows
+            if idx == 0:
+                # H_sp等于纵向分辨率时，纵向的步幅要+1防止翻倍计算全局attention
+                stride = [2, 1]
+            elif idx == 1:
+                # 反之当横向的窗口大小等于横向分辨率时，横向的步幅要+1防止翻倍计算全局attention
+                stride = [1, 2]
+            self.focal_window = [self.H_sp, self.W_sp]
+            kernel_size = self.focal_window
+            # define unfolding operations
+            # 保证unfold后的kv尺寸和原来一样 变向等于是展开了kv
+            self.unfolds += [
+                nn.Unfold(kernel_size=kernel_size,
+                          stride=stride,
+                          padding=tuple(i // 2 for i in kernel_size))
+            ]
 
     def im2cswin(self, x):
         B, N, C = x.shape
@@ -485,6 +518,31 @@ class TemporalLePEAttention(nn.Module):
 
         B, T, H, W, C = q.shape
 
+        # 池化kv用于获得global att
+        if self.cs_focal:
+            nWh = H // self.H_sp
+            nWw = W // self.W_sp
+
+            # 改变kv形状->B, nWh, nWw, T, C, window_size_h*window_size_w
+            k = k.reshape(B, T, nWh, self.H_sp, nWw, self.W_sp, C).permute(0, 2, 4, 1, 6, 3, 5).contiguous() \
+                .reshape(B, nWh, nWw, T, C, self.H_sp * self.W_sp)
+            v = v.reshape(B, T, nWh, self.H_sp, nWw, self.W_sp, C).permute(0, 2, 4, 1, 6, 3, 5).contiguous() \
+                .reshape(B, nWh, nWw, T, C, self.H_sp * self.W_sp)
+
+            # 池化kv
+            k_pooled = self.pool_layers[0](k).flatten(-2)  # B, nWh, nWw, T, C
+            v_pooled = self.pool_layers[0](v).flatten(-2)  # B, nWh, nWw, T, C
+
+            # 转化池化后的kv到需要的shape
+            k_pooled = k_pooled.permute(0, 3, 4, 1, 2).contiguous().reshape(B * T, C, nWh, nWw)  # B*T, C, nWh, nWw
+            v_pooled = v_pooled.permute(0, 3, 4, 1, 2).contiguous().reshape(B * T, C, nWh, nWw)  # B*T, C, nWh, nWw
+
+            # 恢复kv形状->B, T, H, W, C
+            k = k.reshape(B, nWh, nWw, T, C, self.H_sp, self.W_sp).permute(0, 3, 1, 5, 2, 6, 4)\
+                .contiguous().reshape(B, T, H, W, C)
+            v = v.reshape(B, nWh, nWw, T, C, self.H_sp, self.W_sp).permute(0, 3, 1, 5, 2, 6, 4)\
+                .contiguous().reshape(B, T, H, W, C)
+
         ### Img2Window
         if self.temporal:
             # 3D temporal cs win att
@@ -501,6 +559,38 @@ class TemporalLePEAttention(nn.Module):
             q = self.im2cswin(q)
             k = self.im2cswin(k)
             v, lepe = self.get_lepe(v, self.get_v)
+
+        # 利用池化kv增强kv
+        if self.cs_focal:
+            if self.temporal:
+                # 时间也展开(其实一样因为时间窗口是1)
+                (k_pooled, v_pooled) = map(
+                    lambda t: self.unfolds[0]
+                    (t).view(B, T, C, self.unfolds[0].kernel_size[0], self.
+                             unfolds[0].kernel_size[1], -1)
+                        .permute(0, 5, 1, 3, 4, 2).contiguous().view(
+                        -1, T * self.unfolds[0].kernel_size[0] * self.unfolds[
+                            0].kernel_size[1], self.num_heads, C // self.
+                               num_heads).permute(0, 2, 1, 3).contiguous(),
+                    # (B x (nH*nW)) x nHeads x T x (unfold_wsize x unfold_wsize) x head_dim
+                    (k_pooled, v_pooled))
+
+            else:
+                # 空间展开
+                (k_pooled, v_pooled) = map(
+                    lambda t: self.unfolds[0]
+                    (t).view(B * T, C, self.unfolds[0].kernel_size[0], self.
+                             unfolds[0].kernel_size[1], -1)
+                        .permute(0, 4, 2, 3, 1).contiguous().view(
+                        -1, self.unfolds[0].kernel_size[0] * self.unfolds[
+                            0].kernel_size[1], self.num_heads, C // self.
+                            num_heads).permute(0, 2, 1, 3).contiguous(),
+                    # (B x (nH*nW)) x nHeads x T x (unfold_wsize x unfold_wsize) x head_dim
+                    (k_pooled, v_pooled))
+
+            # 增强kv
+            k = torch.cat((k, k_pooled), dim=2)
+            v = torch.cat((v, v_pooled), dim=2)
 
         q = q * self.scale
         attn = (q @ k.transpose(-2, -1))  # B head N C @ B head C N --> B head N N
@@ -1092,7 +1182,7 @@ class WindowAttentionMem(nn.Module):
     def __init__(self, dim, expand_size, window_size, focal_window,
                  focal_level, num_heads, qkv_bias, pool_method,
                  memory, max_mem_len, compression_factor, mem_pool, store_lf, align_cache, sub_token_align, sub_factor,
-                 cross_att, time_att, time_deco, temp_focal, cs_win, mem_att):
+                 cross_att, time_att, time_deco, temp_focal, cs_win, mem_att, cs_focal):
 
         super().__init__()
         self.dim = dim
@@ -1116,6 +1206,7 @@ class WindowAttentionMem(nn.Module):
         self.temp_focal = temp_focal
         self.cs_win = cs_win
         self.mem_att = mem_att
+        self.cs_focal = cs_focal
 
         if any(i > 0 for i in self.expand_size) and focal_level > 0:
             # get mask for rolled k and rolled v
@@ -1230,14 +1321,16 @@ class WindowAttentionMem(nn.Module):
                             self.cs_att = nn.ModuleList([
                                 TemporalLePEAttention(dim//2, resolution=patches_resolution, idx=i,
                                                       split_size=split_size, num_heads=num_heads//2, dim_out=dim//2,
-                                                      qk_scale=None, attn_drop=0., proj_drop=0., temporal=True)
+                                                      qk_scale=None, attn_drop=0., proj_drop=0.,
+                                                      temporal=True, cs_focal=cs_focal)
                                 for i in range(0, 2)])      # 两个，一个横向一个纵向
                         elif self.time_deco:
                             # 解耦时间和空间注意力
                             self.cs_att = nn.ModuleList([
                                 TemporalLePEAttention(dim//2, resolution=patches_resolution, idx=i,
                                                       split_size=split_size, num_heads=num_heads//2, dim_out=dim//2,
-                                                      qk_scale=None, attn_drop=0., proj_drop=0., temporal=False)
+                                                      qk_scale=None, attn_drop=0., proj_drop=0.,
+                                                      temporal=False, cs_focal=cs_focal)
                                 for i in range(0, 2)])      # 两个，一个横向一个纵向
                             # 时间attention的线性层
                             self.cm_proj_t = nn.Linear(dim, dim)
@@ -2084,6 +2177,7 @@ class TemporalFocalTransformerBlock(nn.Module):
         temp_focal (bool): If True, use temporal focal att to cross att time and space.
         cs_win (bool): If True, use cswin att to cross att time and space.
         mem_att (bool): If True, use cross att to fuse different memory with current feat instead of linear and att.
+        cs_focal (bool): If True, use focal mech to upgrade cs win att.
     """
     def __init__(self,
                  dim,
@@ -2111,7 +2205,8 @@ class TemporalFocalTransformerBlock(nn.Module):
                  time_deco=False,
                  temp_focal=False,
                  cs_win=False,
-                 mem_att=False):
+                 mem_att=False,
+                 cs_focal=False):
         super().__init__()
         self.dim = dim
         self.num_heads = num_heads
@@ -2173,7 +2268,8 @@ class TemporalFocalTransformerBlock(nn.Module):
                                            time_deco=time_deco,
                                            temp_focal=temp_focal,
                                            cs_win=cs_win,
-                                           mem_att=mem_att)
+                                           mem_att=mem_att,
+                                           cs_focal=cs_focal)
 
         self.norm2 = norm_layer(dim)
         self.mlp = FusionFeedForward(dim, n_vecs=n_vecs, t2t_params=t2t_params)
