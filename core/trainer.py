@@ -175,6 +175,12 @@ class Trainer:
                 else:
                     self.cs_win = False
 
+                # 是否使用attention聚合不同时间的记忆和当前特征，而不是使用线性层聚合记忆再attention
+                if config['model']['mem_att'] != 0:
+                    self.mem_att = True
+                else:
+                    self.mem_att = False
+
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,
                     token_fusion_simple=self.token_fusion_simple, fusion_skip_connect=self.fusion_skip_connect,
@@ -183,7 +189,7 @@ class Trainer:
                     store_lf=self.store_lf, align_cache=self.align_cache, sub_token_align=self.sub_token_align,
                     sub_factor=self.sub_factor, half_memory=self.half_memory, last_memory=self.last_memory,
                     cross_att=self.cross_att, time_att=self.time_att, time_deco=self.time_deco,
-                    temp_focal=self.temp_focal, cs_win=self.cs_win)
+                    temp_focal=self.temp_focal, cs_win=self.cs_win, mem_att=self.mem_att)
             else:
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,
