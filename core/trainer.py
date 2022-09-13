@@ -172,8 +172,14 @@ class Trainer:
                 # 是否在聚合时空记忆时使用cswin attention
                 if config['model']['cs_win'] != 0:
                     self.cs_win = True
+                    if config['model']['cs_win'] == 2:
+                        # cs_win_strip决定了cswin的条带宽度，默认为1
+                        self.cs_win_strip = 2
+                    else:
+                        self.cs_win_strip = 1
                 else:
                     self.cs_win = False
+                    self.cs_win_strip = 1
 
                 # 是否使用attention聚合不同时间的记忆和当前特征，而不是使用线性层聚合记忆再attention
                 if config['model']['mem_att'] != 0:
@@ -200,7 +206,7 @@ class Trainer:
                     sub_factor=self.sub_factor, half_memory=self.half_memory, last_memory=self.last_memory,
                     cross_att=self.cross_att, time_att=self.time_att, time_deco=self.time_deco,
                     temp_focal=self.temp_focal, cs_win=self.cs_win, mem_att=self.mem_att, cs_focal=self.cs_focal,
-                    cs_focal_v2=self.cs_focal_v2)
+                    cs_focal_v2=self.cs_focal_v2, cs_win_strip=self.cs_win_strip)
             else:
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,

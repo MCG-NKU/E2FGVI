@@ -420,15 +420,31 @@ class TemporalLePEAttention(nn.Module):
             else:
                 # 第二个版本的focal cs win
                 # 使用与池化完特征方向相同的滑窗，感受野扩展到非局部
-                stride = 1
-                self.focal_window = [self.W_sp, self.H_sp]      # 刚好和原来的窗口相反
-                kernel_size = self.focal_window
-                if idx == 0:
-                    # H_sp等于纵向分辨率时，考虑最后一个窗口需要pad H_sp-1, 注意padding是两边的
-                    padding = [0, self.H_sp//2]
-                elif idx == 1:
-                    # 反之当横向的窗口大小等于横向分辨率时，考虑最后一个窗口需要pad W_sp-1, 注意padding是两边的
-                    padding = [self.W_sp//2, 0]
+                if self.split_size == 1:
+                    # 条形窗口宽度为1
+                    stride = 1
+                    self.focal_window = [self.W_sp, self.H_sp]      # 刚好和原来的窗口相反
+                    kernel_size = self.focal_window
+                    if idx == 0:
+                        # H_sp等于纵向分辨率时，考虑最后一个窗口需要pad H_sp-1, 注意padding是两边的
+                        padding = [0, self.H_sp//2]
+                    elif idx == 1:
+                        # 反之当横向的窗口大小等于横向分辨率时，考虑最后一个窗口需要pad W_sp-1, 注意padding是两边的
+                        padding = [self.W_sp//2, 0]
+                else:
+                    # 条形窗口宽度不为1
+                    # 此时池化完的特征宽度上也要padding，并且步幅必须为2
+                    self.focal_window = [self.W_sp, self.H_sp]      # 刚好和原来的窗口相反
+                    kernel_size = self.focal_window
+                    if idx == 0:
+                        # H_sp等于纵向分辨率时，考虑最后一个窗口需要pad H_sp-1, 注意padding是两边的
+                        padding = [self.W_sp//2, self.H_sp//2]
+                        stride = [2, 1]
+                    elif idx == 1:
+                        # 反之当横向的窗口大小等于横向分辨率时，考虑最后一个窗口需要pad W_sp-1, 注意padding是两边的
+                        padding = [self.W_sp//2, self.H_sp//2]
+                        stride = [1, 2]
+
                 # define unfolding operations
                 # 保证unfold后的kv尺寸和原来一样 变向等于是展开了kv
                 self.unfolds += [
@@ -815,7 +831,7 @@ class CrossFocalAttention(nn.Module):
                 num_heads, C // self.num_heads).permute(0, 3, 1, 2, 4).
             contiguous().view(-1, self.num_heads, T * self.window_size[
                 0] * self.window_size[1], C // self.num_heads), (q, k, v))
-        # q(k/v)_windows shape : [16, 4, 225, 128]
+        # q(k/v)_windows shape : [16, 4, 225, 128] i.e. [B*nWh*nWw, head, T*H/nWh*H/nWw, C/head]
 
         if any(i > 0 for i in self.expand_size) and self.focal_level > 0:
             (k_tl, v_tl) = map(
@@ -838,7 +854,7 @@ class CrossFocalAttention(nn.Module):
                                      shifts=(self.expand_size[0], self.
                                              expand_size[1]),
                                      dims=(2, 3)), (k, v))
-
+            # k_tl.shape=k.shape k_tl_windows=[B*nWh*nWw, T, H/nWh*H/nWw, head, C/head]
             (k_tl_windows, k_tr_windows, k_bl_windows, k_br_windows) = map(
                 lambda t: window_partition(t, self.window_size).view(
                     -1, T, self.window_size[0] * self.window_size[1], self.
@@ -849,13 +865,13 @@ class CrossFocalAttention(nn.Module):
                     num_heads, C // self.num_heads), (v_tl, v_tr, v_bl, v_br))
             k_rolled = torch.cat(
                 (k_tl_windows, k_tr_windows, k_bl_windows, k_br_windows),
-                2).permute(0, 3, 1, 2, 4).contiguous()
+                2).permute(0, 3, 1, 2, 4).contiguous()      # k_rolled=[B*nWh*nWw, head, T, 4*H/nWh*H/nWw, C/head]
             v_rolled = torch.cat(
                 (v_tl_windows, v_tr_windows, v_bl_windows, v_br_windows),
                 2).permute(0, 3, 1, 2, 4).contiguous()
 
             # mask out tokens in current window
-            k_rolled = k_rolled[:, :, :, self.valid_ind_rolled]
+            k_rolled = k_rolled[:, :, :, self.valid_ind_rolled]     # [B*nWh*nWw, head, T, 4*H/nWh*H/nWw-60, C/head]
             v_rolled = v_rolled[:, :, :, self.valid_ind_rolled]
             temp_N = k_rolled.shape[3]
             k_rolled = k_rolled.view(-1, self.num_heads, T * temp_N,
@@ -1259,7 +1275,7 @@ class WindowAttentionMem(nn.Module):
     def __init__(self, dim, expand_size, window_size, focal_window,
                  focal_level, num_heads, qkv_bias, pool_method,
                  memory, max_mem_len, compression_factor, mem_pool, store_lf, align_cache, sub_token_align, sub_factor,
-                 cross_att, time_att, time_deco, temp_focal, cs_win, mem_att, cs_focal, cs_focal_v2):
+                 cross_att, time_att, time_deco, temp_focal, cs_win, mem_att, cs_focal, cs_focal_v2, cs_win_strip):
 
         super().__init__()
         self.dim = dim
@@ -1391,14 +1407,16 @@ class WindowAttentionMem(nn.Module):
                     elif self.cs_win:
                         # 使用cs win attention
                         window_stride = 4  # 每个window在两个方向上占用了多少个token
-                        split_size = 1  # 条形窗口的宽度
+                        split_size = cs_win_strip  # 条形窗口的宽度
+                        num_heads_cs = num_heads//2
+
                         patches_resolution = [self.window_size[0] * window_stride,
                                               self.window_size[1] * window_stride]     # token的纵向和横向的个数
                         if not self.time_deco:
                             # 把时间和空间窗口合并进行3D cross attention
                             self.cs_att = nn.ModuleList([
                                 TemporalLePEAttention(dim//2, resolution=patches_resolution, idx=i,
-                                                      split_size=split_size, num_heads=num_heads//2, dim_out=dim//2,
+                                                      split_size=split_size, num_heads=num_heads_cs, dim_out=dim//2,
                                                       qk_scale=None, attn_drop=0., proj_drop=0.,
                                                       temporal=True, cs_focal=cs_focal, cs_focal_v2=cs_focal_v2)
                                 for i in range(0, 2)])      # 两个，一个横向一个纵向
@@ -1406,7 +1424,7 @@ class WindowAttentionMem(nn.Module):
                             # 解耦时间和空间注意力
                             self.cs_att = nn.ModuleList([
                                 TemporalLePEAttention(dim//2, resolution=patches_resolution, idx=i,
-                                                      split_size=split_size, num_heads=num_heads//2, dim_out=dim//2,
+                                                      split_size=split_size, num_heads=num_heads_cs, dim_out=dim//2,
                                                       qk_scale=None, attn_drop=0., proj_drop=0.,
                                                       temporal=False, cs_focal=cs_focal, cs_focal_v2=cs_focal_v2)
                                 for i in range(0, 2)])      # 两个，一个横向一个纵向
@@ -2258,6 +2276,7 @@ class TemporalFocalTransformerBlock(nn.Module):
         cs_focal (bool): If True, use focal mech to upgrade cs win att.
         cs_focal_v2 (bool): If True, upgrade cswin att with same direction sliding window of pooled feat,
                             Only work with cs_focal=True.
+        cs_win_strip (int): cs win attention strip width. Default: 1.
     """
     def __init__(self,
                  dim,
@@ -2287,7 +2306,8 @@ class TemporalFocalTransformerBlock(nn.Module):
                  cs_win=False,
                  mem_att=False,
                  cs_focal=False,
-                 cs_focal_v2=False):
+                 cs_focal_v2=False,
+                 cs_win_strip=1):
         super().__init__()
         self.dim = dim
         self.num_heads = num_heads
@@ -2351,7 +2371,8 @@ class TemporalFocalTransformerBlock(nn.Module):
                                            cs_win=cs_win,
                                            mem_att=mem_att,
                                            cs_focal=cs_focal,
-                                           cs_focal_v2=cs_focal_v2)
+                                           cs_focal_v2=cs_focal_v2,
+                                           cs_win_strip=cs_win_strip)
 
         self.norm2 = norm_layer(dim)
         self.mlp = FusionFeedForward(dim, n_vecs=n_vecs, t2t_params=t2t_params)
