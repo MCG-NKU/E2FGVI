@@ -184,8 +184,12 @@ class Trainer:
                 # 是否为cswin引入类似temporal focal的机制来增强注意力
                 if config['model']['cs_focal'] != 0:
                     self.cs_focal = True
+                    if config['model']['cs_focal'] == 2:
+                        # 改进的正交全局滑窗策略，取到non-local的focal窗口
+                        self.cs_focal_v2 = True
                 else:
                     self.cs_focal = False
+                    self.cs_focal_v2 = False
 
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,
@@ -195,7 +199,8 @@ class Trainer:
                     store_lf=self.store_lf, align_cache=self.align_cache, sub_token_align=self.sub_token_align,
                     sub_factor=self.sub_factor, half_memory=self.half_memory, last_memory=self.last_memory,
                     cross_att=self.cross_att, time_att=self.time_att, time_deco=self.time_deco,
-                    temp_focal=self.temp_focal, cs_win=self.cs_win, mem_att=self.mem_att, cs_focal=self.cs_focal)
+                    temp_focal=self.temp_focal, cs_win=self.cs_win, mem_att=self.mem_att, cs_focal=self.cs_focal,
+                    cs_focal_v2=self.cs_focal_v2)
             else:
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,

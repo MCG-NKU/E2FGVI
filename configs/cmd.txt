@@ -615,14 +615,32 @@ All average forward run time: (0.049149) per frame[矩池云3090]
 
 # 测试基于 cross attention 记忆力聚合的训练显存消耗
 # 基于本地3090/3090Ti测试
-1.large-MFN-T1C1-LastMem-csT-deco 可以单卡bs2正常训练
-2.large-MFN-T1C1-LastMem-csT 可以单卡bs2正常训练 但是速度非常非常慢
-3.large-MFN-T1C1-HalfMem-csT 炸裂，不可以训练
+1.large-MFN-T1C1-LastMem-csT 可以单卡bs2正常训练 但是速度非常非常慢
+2.large-MFN-T1C1-HalfMem-csT 炸裂，不可以训练
+
+3.large-MFN-T1C1-LastMem-csT-deco 可以单卡bs2正常训练
 4.large-MFN-T1C1-HalfMem-csT-deco 可以单卡bs2正常训练
-5.large-MFN-T1C1-csT-deco 所有层都有记忆力，可以单卡bs2正常训练 但是速度非常非常慢
+5.large-MFN-T1C1-csT-deco 所有层都有记忆力，可以单卡bs2正常训练 但是速度非常非常慢 看来时空解耦进行attention非常有必要。
+
 6.large-MFN-T2C1-LastMem-csT-deco 可以单卡bs2正常训练
 7.large-MFN-T2C1-HalfMem-csT-deco 可以单卡bs2正常训练 但是速度非常非常慢
-看来时空解耦进行attention非常有必要。
+
+8.large-MFN-T1C1-LastMem-csT-cs 可以单卡bs2正常训练 使用cswin 不解耦也可以进行3D attention训练
+9.large-MFN-T1C1-HalfMem-csT-cs 可以单卡bs2正常训练 使用cswin 不解耦也可以进行3D attention训练 甚至一半层都可以有
+10.large-MFN-T1C1-csT-cs 可以单卡bs2正常训练 使用cswin 可以所有8层全开记忆力进行3D attention 牛逼
+
+11.large-MFN-T1C1-LastMem-csT-deco-cs 当然可以 不解耦都可以
+12.large-MFN-T1C1-HalfMem-csT-deco-cs 当然可以 不解耦都可以
+13.large-MFN-T1C1-csT-deco-cs 当然可以 不解耦都可以 而且更快
+
+14.large-MFN-T2C1-LastMem-csT-deco-cs-mem_att 基于矩池云3090测试 不可以单卡训练
+15.large-MFN-T2C1-LastMem-csT-cs-mem_att 基于矩池云3090测试 不可以单卡训练
+
+16.large-MFN-T1C1-LastMem-csT-tf 基于本地3090测试 可以单卡正常训练
+17.large-MFN-T1C1-HalfMem-csT-tf 基于本地3090测试 可以单卡正常训练 但是速度非常非常慢
+18.large-MFN-T1C1-csT-tf 基于本地3090测试 爆显存
+
+
 
 # 实现基于窗口cross attention的记忆力聚合 [未开始]
 
@@ -638,6 +656,7 @@ focal也是有效的，但是精度提升没有解耦的时空attention有效。
 CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-tf/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
 [250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.17/0.9428/0.222
 All average forward run time: (0.027323) per frame[本地3090]
+All average forward run time: (0.027848) per frame[矩池云3090]
 虽然默认逻辑比不过，但是序列测试下tf会比简单解耦的att更有效！真正的又快又好~
 可能是解耦的att对于输入形式的变化更加鲁棒，因为更通用，没有对于输入数据本身做一些针对性的设计。
 而tf则能够在特定的输入模式下更强。
@@ -670,18 +689,79 @@ CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/
 All average forward run time: (0.045693) per frame[3090Ti]
 怎么说呢，推理两次精度也能上来一些，但是不如记忆一次的，属实是打扰了。
 
-# 实现对于attention更长的记忆力聚合，在att前先用线性层聚合缓存 [tmux 0]
+# 实现对于attention更长的记忆力聚合，在att前先用线性层聚合缓存 [已完成]
 # 更长的记忆缓存会带来更好的效果吗？注意在做attention的时候通道数其实没变哦，都是聚合完的
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T4C1-LastMem-csT-deco.json
+默认的半滑窗逻辑测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T4C1-LastMem-csT-deco/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.69/0.9397/0.230
+All average forward run time: (0.061220) per frame[矩池云3090]
+序列测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T4C1-LastMem-csT-deco/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.98/0.9404/0.225
+All average forward run time: (0.027485) per frame[矩池云3090]
+序列测试x2：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T4C1-LastMem-csT-deco/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.20/0.9427/0.212
+All average forward run time: (0.054485) per frame[矩池云3090]
+没什么好说的，直接用线性层聚合记忆缓存内部本身就不合理，延长记忆时间自然效果也不好
 
-# 实现对于attention更长的记忆力聚合，在att前先用线性层聚合缓存 [tmux 1]
+# 实现对于attention更长的记忆力聚合，在att前先用线性层聚合缓存 [已完成]
 # 缓存长了，压缩比也上升会怎么样呢
 CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_lite-MFN-mem-T4C4-LastMem-csT-deco.json
+默认的半滑窗逻辑测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T4C4-LastMem-csT-deco/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.08/0.9427/0.226
+All average forward run time: (0.058891) per frame[矩池云3090]
+虽然线性层聚合效果不佳，但是时间拉长后压缩一下也还可以。
+序列测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T4C4-LastMem-csT-deco/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.04/0.9411/0.225
+All average forward run time: (0.027243) per frame[矩池云3090]
+也还行吧，但是没有T1C1的好~
+序列测试x2：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T4C4-LastMem-csT-deco/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.30/0.9435/0.217
+All average forward run time: (0.054678) per frame[矩池云3090]
+和T1C1一样，你说岂不是没必要。总结下来的经验就是，不要再用线性层聚合记忆缓存了！会变得不幸
 
-# 实现基于cs win cross att的时空记忆聚合 [3090] 约需要51h
-# 该版本将T维度和空间维度合并进行3D attention，前几个epoch似乎很慢，后面突然快起来了。。。
+# 实现基于cs win cross att的时空记忆聚合 [已完成] 需要49h
+# 该版本将T维度和空间维度合并进行3D attention，前几个epoch似乎很慢，后面突然快起来了。。。原来是因为之前的todesk没关闭
 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-cs.json
+默认的半滑窗逻辑测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-cs/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.95/0.9411/0.221
+All average forward run time: (0.079886) per frame[本地3090]
+精度不如temp focal
+序列测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-cs/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.93/0.9395/0.232
+All average forward run time: (0.025941) per frame[本地3090]
+效果很差，完全不是tf的对手。。。
+序列测试x2：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-cs/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.14/0.9416/0.217
+All average forward run time: (0.050682) per frame[本地3090]
+打扰了，完全不是tf的对手
+
+# 实现基于cs win cross att的时空记忆聚合 [3090Ti] 约需要42h
+# 通过解耦时间和空间进行3D attention，相当于用cs win替代deco版本里的空间attention
+python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-cs.json
+
+# 实现基于deco cs win直接对齐多个记忆张量，而不是先聚合记忆，再做cross attention(对于记忆时长大于1的情况) [tmux 0] 约需要55.5h
+# mem_att 表示直接用cross attention把不同时间的记忆和当前特征聚合，而不是先用线性层聚合记忆再和当前cross att
+# 相同的设置使用大模型似乎无法开启训练 也可能是矩池云的3090可用显存比较小
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T2C1-LastMem-csT-deco-cs-mem_att.json
+
+# 实现基于cs win cross att的时空记忆聚合 [tmux 1] 约需要h
+# 通过解耦时间和空间进行3D attention，相当于用cs win替代deco版本里的空间attention
+# 并且，仿照temporal focal的思想将各个条形窗口进行池化，获得更general的注意力
+# 我称之为 temporal CSWin (csf) CSWin Focal 可以解耦也可以不解耦
+CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csf.json
 
 # 实现基于cs win cross att的时空记忆聚合 [未开始] 约需要h
 # 通过解耦时间和空间进行3D attention，相当于用cs win替代deco版本里的空间attention
-python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-cs.json
+# 并且，仿照temporal focal的思想将各个条形窗口进行池化，获得更general的注意力
+# 我称之为 temporal CSWin (csf) CSWin Focal 可以解耦也可以不解耦
+# 优化了Focal的机制，非局部attention的滑窗沿着池化完的kv方向滑动，刚好和原来的条形kv是正交的，这样可以保证能取到全局感受野 Focal-v2
+python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csfv2.json
