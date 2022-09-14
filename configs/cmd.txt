@@ -744,9 +744,24 @@ CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/
 All average forward run time: (0.050682) per frame[本地3090]
 打扰了，完全不是tf的对手
 
-# 实现基于cs win cross att的时空记忆聚合 [3090Ti] 约需要42h
+# 实现基于cs win cross att的时空记忆聚合 [已完成] 需要41.7h
 # 通过解耦时间和空间进行3D attention，相当于用cs win替代deco版本里的空间attention
 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-cs.json
+默认的半滑窗逻辑测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-cs/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.94/0.9404/0.224
+All average forward run time: (0.076354) per frame[3090Ti]
+比不解耦要差一点，整体还是很差这个cswin
+序列测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-cs/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.98/0.9400/0.229
+All average forward run time: (0.023590) per frame[3090Ti]
+比不解耦要强一点点，解耦的精度也不咋地，属实是不想搞了，真的拉跨
+序列测试x2：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-cs/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.23/0.9423/0.214
+All average forward run time: (0.045619) per frame[3090Ti]
+推理两次精度能救回来一点，但是比tf的29.46还是有很大的差距
 
 # 实现基于deco cs win直接对齐多个记忆张量，而不是先聚合记忆，再做cross attention(对于记忆时长大于1的情况) [tmux 0] 约需要55.5h
 # mem_att 表示直接用cross attention把不同时间的记忆和当前特征聚合，而不是先用线性层聚合记忆再和当前cross att
@@ -759,9 +774,28 @@ CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T2C1-Las
 # 我称之为 temporal CSWin (csf) CSWin Focal 可以解耦也可以不解耦
 CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csf.json
 
-# 实现基于cs win cross att的时空记忆聚合 [未开始] 约需要h
+# 实现基于cs win cross att的时空记忆聚合 [本地3090] 约需要45.5h
 # 通过解耦时间和空间进行3D attention，相当于用cs win替代deco版本里的空间attention
 # 并且，仿照temporal focal的思想将各个条形窗口进行池化，获得更general的注意力
 # 我称之为 temporal CSWin (csf) CSWin Focal 可以解耦也可以不解耦
 # 优化了Focal的机制，非局部attention的滑窗沿着池化完的kv方向滑动，刚好和原来的条形kv是正交的，这样可以保证能取到全局感受野 Focal-v2
 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csfv2.json
+
+# 实现基于cs win cross att的时空记忆聚合 [未开始] 约需要h
+# 不解耦的cswin 配备 focal v2机制
+python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-csfv2.json
+
+# 实现基于 strip宽度2 cs win cross att的时空记忆聚合 [未开始] 约需要h
+python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-cs2.json
+
+# 实现 strip 2 + focal 机制的 cs win cross att 时空记忆聚合 [3090Ti] 约需要43.5h
+python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-cs2fv2.json
+
+# 调整序列训练的mask逻辑到和测试时的逻辑一致，即只有切换视频时才重新生成mask [未开始] 约需要h
+python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-tf-mask2.json
+
+# 将HRViT中MixCFN的设计迁移到FFN上 [未开始] 约需要h
+python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-tf-Mix.json
+
+# 将HRViT中CONV Path的设计迁移到CSWin上 [未开始] 约需要h
+python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-cs-CONV.json

@@ -487,6 +487,8 @@ class TrainDataset_Mem(torch.utils.data.Dataset):
     def load_item_v4(self):
         """避免dataloader的index和worker的index冲突"""
         video_name = self.video_names[self.index]
+
+        # TODO: 保证每次切换到新视频前mask是一致的，这样记忆才有意义？ 这样逻辑也和测试逻辑一致了
         # create masks
         all_masks = create_random_shape_with_random_motion(
             self.video_dict[video_name], imageHeight=self.h, imageWidth=self.w)
