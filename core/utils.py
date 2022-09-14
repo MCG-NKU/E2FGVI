@@ -227,6 +227,134 @@ def create_random_shape_with_random_motion(video_length,
     return masks
 
 
+def create_random_shape_with_random_motion_seq(video_length,
+                                               imageHeight=240,
+                                               imageWidth=432,
+                                               new_mask=True,
+                                               random_dict=None
+                                               ):
+    """
+    Sequence Mask Generator by Hao, based on E2FGVI mask generator.
+    new_mask (bool): If True, generate a new batch of mask;
+                     If False, use the previous params to generate the same mask.
+    """
+
+    if new_mask:
+        # 生成新mask的一大堆参数
+        # get a random shape
+        height = random.randint(imageHeight // 3, imageHeight - 1)
+        width = random.randint(imageWidth // 3, imageWidth - 1)
+        edge_num = random.randint(6, 8)
+        ratio = random.randint(6, 8) / 10
+        # region = get_random_shape(edge_num=edge_num,
+        #                           ratio=ratio,
+        #                           height=height,
+        #                           width=width)
+        region, random_point = get_random_shape_seq(edge_num=edge_num,
+                                                    ratio=ratio,
+                                                    height=height,
+                                                    width=width)
+        region_width, region_height = region.size
+
+        # get random position
+        x, y = random.randint(0, imageHeight - region_height), random.randint(
+            0, imageWidth - region_width)
+        velocity = get_random_velocity(max_speed=3)
+
+        # get random probability
+        prob = random.uniform(0, 1)
+
+        # 存储新生成的随机参数字典
+        random_dict = {}
+        # random_dict['region'] = region    # pytorch 的 dataloader无法返回PIL-Image格式的数据
+        random_dict['edge_num'] = edge_num
+        random_dict['ratio'] = ratio
+        random_dict['height'] = height
+        random_dict['width'] = width
+        random_dict['random_point'] = random_point
+        random_dict['x'] = x
+        random_dict['y'] = y
+        random_dict['velocity'] = velocity
+        random_dict['prob'] = prob
+
+    else:
+        # 用旧的参数，不用重新生成
+        # region = random_dict['region']
+        edge_num = random_dict['edge_num']
+        ratio = random_dict['ratio']
+        height = random_dict['height']
+        width = random_dict['width']
+        random_point = random_dict['random_point']
+        # 当random point固定后区域实际上已经固定了
+        region, random_point = get_random_shape_seq(edge_num=edge_num,
+                                                    ratio=ratio,
+                                                    height=height,
+                                                    width=width,
+                                                    random_point=random_point)
+
+        x = random_dict['x']
+        y = random_dict['y']
+        velocity = random_dict['velocity']
+        prob = random_dict['prob']
+
+    # 创建静态mask
+    m = Image.fromarray(np.zeros((imageHeight, imageWidth)).astype(np.uint8))
+    m.paste(region, (y, x, y + region.size[0], x + region.size[1]))
+    masks = [m.convert('L')]
+
+    # return fixed masks
+    if prob > 0.5:
+        return masks * video_length, random_dict
+
+    # return moving masks
+    # 由于moving有个随机运动, 也希望一致所以需要返回这些位置和速度
+    if new_mask:
+        x_list = []
+        y_list = []
+        velocity_list = []
+    else:
+        # 如果使用之前的运动参数，读取一下
+        x_list = random_dict['x_list']
+        y_list = random_dict['y_list']
+        velocity_list = random_dict['velocity_list']
+
+    for idx in range(video_length - 1):
+        if new_mask:
+            # 重新生成每一帧的随机
+            x, y, velocity = random_move_control_points(x,
+                                                        y,
+                                                        imageHeight,
+                                                        imageWidth,
+                                                        velocity,
+                                                        region.size,
+                                                        maxLineAcceleration=(3,
+                                                                             0.5),
+                                                        maxInitSpeed=3)
+            # 存储位置和速度
+            x_list.append(x)
+            y_list.append(y)
+            velocity_list.append(velocity)
+        else:
+            # 直接从dict的list里面读取
+            x = x_list[idx]
+            y = y_list[idx]
+            velocity = velocity_list[idx]
+
+        # 生成当前帧的运动mask
+        m = Image.fromarray(
+            np.zeros((imageHeight, imageWidth)).astype(np.uint8))
+        m.paste(region, (y, x, y + region.size[0], x + region.size[1]))
+        masks.append(m.convert('L'))
+
+    # 把新生成的运动mask位置和速度保存到字典里
+    if new_mask:
+        random_dict['x_list'] = x_list
+        random_dict['y_list'] = y_list
+        random_dict['velocity_list'] = velocity_list
+
+    return masks, random_dict
+
+
 def get_random_shape(edge_num=9, ratio=0.7, width=432, height=240):
     '''
       There is the initial point and 3 points per cubic bezier curve.
@@ -266,6 +394,55 @@ def get_random_shape(edge_num=9, ratio=0.7, width=432, height=240):
         corrdinates[0]), np.min(corrdinates[1]), np.max(corrdinates[1])
     region = Image.fromarray(data).crop((ymin, xmin, ymax, xmax))
     return region
+
+
+def get_random_shape_seq(edge_num=9, ratio=0.7, width=432, height=240, random_point=None):
+    '''
+      There is the initial point and 3 points per cubic bezier curve.
+      Thus, the curve will only pass though n points, which will be the sharp edges.
+      The other 2 modify the shape of the bezier curve.
+      edge_num, Number of possibly sharp edges
+      points_num, number of points in the Path
+      ratio, (0, 1) magnitude of the perturbation from the unit circle,
+      Revised by Hao:
+      random_point: if given, the shape is known and fixed.
+    '''
+    points_num = edge_num * 3 + 1
+
+    if random_point is None:
+        random_point = np.random.random(points_num)
+    else:
+        random_point = random_point
+
+    angles = np.linspace(0, 2 * np.pi, points_num)
+    codes = np.full(points_num, Path.CURVE4)
+    codes[0] = Path.MOVETO
+    # Using this instad of Path.CLOSEPOLY avoids an innecessary straight line
+    verts = np.stack((np.cos(angles), np.sin(angles))).T * \
+        (2*ratio*random_point+1-ratio)[:, None]
+    verts[-1, :] = verts[0, :]
+    path = Path(verts, codes)
+    # draw paths into images
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    patch = patches.PathPatch(path, facecolor='black', lw=2)
+    ax.add_patch(patch)
+    ax.set_xlim(np.min(verts) * 1.1, np.max(verts) * 1.1)
+    ax.set_ylim(np.min(verts) * 1.1, np.max(verts) * 1.1)
+    ax.axis('off')  # removes the axis to leave only the shape
+    fig.canvas.draw()
+    # convert plt images into numpy images
+    data = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+    data = data.reshape((fig.canvas.get_width_height()[::-1] + (3, )))
+    plt.close(fig)
+    # postprocess
+    data = cv2.resize(data, (width, height))[:, :, 0]
+    data = (1 - np.array(data > 0).astype(np.uint8)) * 255
+    corrdinates = np.where(data > 0)
+    xmin, xmax, ymin, ymax = np.min(corrdinates[0]), np.max(
+        corrdinates[0]), np.min(corrdinates[1]), np.max(corrdinates[1])
+    region = Image.fromarray(data).crop((ymin, xmin, ymax, xmax))
+    return region, random_point
 
 
 def random_accelerate(velocity, maxAcceleration, dist='uniform'):

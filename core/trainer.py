@@ -30,10 +30,19 @@ class Trainer:
         if config['train_data_loader']['sequence_load'] == 0:
             # 默认的训练loader，非序列化输入训练
             self.train_dataset = TrainDataset(config['train_data_loader'])
+            self.same_mask = False
         else:
             # 记忆训练的序列化训练loader
+            # 是否在切换到下一个视频前使用相同的mask
+            if config['train_data_loader']['sequence_load'] == 1:
+                # 使用不同的重新生成的mask
+                self.same_mask = False
+            else:
+                # 同一个视频使用相同的mask
+                self.same_mask = True
             self.train_dataset = TrainDataset_Mem(config['train_data_loader'],
-                                                  batch_size=config['trainer']['batch_size'])
+                                                  batch_size=config['trainer']['batch_size'],
+                                                  same_mask=self.same_mask)
 
         self.train_sampler = None
         self.train_args = config['trainer']
@@ -450,7 +459,12 @@ class Trainer:
                 self._train_epoch(pbar)
             else:
                 # 序列视频输入用于记忆力训练
-                self._train_epoch_mem(pbar)
+                if not self.same_mask:
+                    # 使用随机mask训练
+                    self._train_epoch_mem(pbar)
+                else:
+                    # 使用固定mask训练，需要返回mask的字典
+                    self._train_epoch_mem_mask(pbar)
 
             if self.iteration > self.train_args['iterations']:
                 break
@@ -609,6 +623,166 @@ class Trainer:
             # except:
             #     pass
             # if ii > 10000:
+            #     break
+
+            frames, masks = frames.to(device), masks.to(device)
+            l_t = self.num_local_frames
+            b, t, c, h, w = frames.size()
+
+            masked_frames = (frames * (1 - masks).float())
+            gt_local_frames = (frames[:, :l_t, ...] + 1) / 2
+
+            pred_imgs, pred_flows = self.netG(masked_frames, l_t)
+            pred_imgs = pred_imgs.view(b, -1, c, h, w)
+            comp_imgs = frames * (1. - masks) + masks * pred_imgs
+
+            # compute flow completion loss
+            flow_loss = self.flow_comp_loss(pred_flows, gt_local_frames)
+
+            gen_loss = 0
+            dis_loss = 0
+
+            if not self.config['model']['no_dis']:
+                # discriminator adversarial loss
+                real_clip = self.netD(frames)
+                fake_clip = self.netD(comp_imgs.detach())
+                dis_real_loss = self.adversarial_loss(real_clip, True, True)
+                dis_fake_loss = self.adversarial_loss(fake_clip, False, True)
+                dis_loss += (dis_real_loss + dis_fake_loss) / 2
+                self.add_summary(self.dis_writer, 'loss/dis_vid_fake',
+                                 dis_fake_loss.item())
+                self.add_summary(self.dis_writer, 'loss/dis_vid_real',
+                                 dis_real_loss.item())
+                self.optimD.zero_grad()
+                dis_loss.backward()
+                self.optimD.step()
+
+                # generator adversarial loss
+                gen_clip = self.netD(comp_imgs)
+                gan_loss = self.adversarial_loss(gen_clip, True, False)
+                gan_loss = gan_loss \
+                           * self.config['losses']['adversarial_weight']
+                gen_loss += gan_loss
+                self.add_summary(self.gen_writer, 'loss/gan_loss',
+                                 gan_loss.item())
+
+            flow_loss = flow_loss * self.config['losses']['flow_weight']
+            gen_loss += flow_loss
+            self.add_summary(self.gen_writer, 'loss/flow_loss',
+                             flow_loss.item())
+
+            # generator l1 loss
+            hole_loss = self.l1_loss(pred_imgs * masks, frames * masks)
+            # 空洞内的loss
+            hole_loss = hole_loss / torch.mean(masks) \
+                        * self.config['losses']['hole_weight']
+            gen_loss += hole_loss
+            self.add_summary(self.gen_writer, 'loss/hole_loss',
+                             hole_loss.item())
+
+            valid_loss = self.l1_loss(pred_imgs * (1 - masks),
+                                      frames * (1 - masks))
+            # 非遮挡区域的loss
+            valid_loss = valid_loss / torch.mean(1 - masks) \
+                         * self.config['losses']['valid_weight']
+            gen_loss += valid_loss
+            self.add_summary(self.gen_writer, 'loss/valid_loss',
+                             valid_loss.item())
+
+            self.optimG.zero_grad()
+            # gen loss 是对抗、光流、空洞和非遮挡区域loss之和
+            gen_loss.backward()
+            self.optimG.step()
+
+            self.update_learning_rate()
+
+            # console logs
+            if self.config['global_rank'] == 0:
+                pbar.update(1)
+                if not self.config['model']['no_dis']:
+                    pbar.set_description((f"flow: {flow_loss.item():.3f}; "
+                                          f"d: {dis_loss.item():.3f}; "
+                                          f"hole: {hole_loss.item():.3f}; "
+                                          f"valid: {valid_loss.item():.3f}"))
+                else:
+                    pbar.set_description((f"flow: {flow_loss.item():.3f}; "
+                                          f"hole: {hole_loss.item():.3f}; "
+                                          f"valid: {valid_loss.item():.3f}"))
+
+                if self.iteration % self.train_args['log_freq'] == 0:
+                    if not self.config['model']['no_dis']:
+                        logging.info(f"[Iter {self.iteration}] "
+                                     f"flow: {flow_loss.item():.4f}; "
+                                     f"d: {dis_loss.item():.4f}; "
+                                     f"hole: {hole_loss.item():.4f}; "
+                                     f"valid: {valid_loss.item():.4f}")
+                    else:
+                        logging.info(f"[Iter {self.iteration}] "
+                                     f"flow: {flow_loss.item():.4f}; "
+                                     f"hole: {hole_loss.item():.4f}; "
+                                     f"valid: {valid_loss.item():.4f}")
+
+            # saving models
+            if self.iteration % self.train_args['save_freq'] == 0:
+                self.save(int(self.iteration))
+
+            if self.iteration > self.train_args['iterations']:
+                break
+
+    def _train_epoch_mem_mask(self, pbar):
+        """Process input and calculate loss every training epoch in a sequence manner with memory"""
+        device = self.config['device']
+
+        # # debug
+        # video_index_list = []
+        # start_index_list = []
+        # video_name_list = []
+        # ii = 0
+        # torch.autograd.set_detect_anomaly(True)
+
+        for frames, masks, video_name, index, start_index, new_mask, mask_dict in self.train_loader:
+            self.iteration += 1
+
+            # 当有新视频出现时，即start_index为0时，清空记忆缓存
+            for start_idx in start_index:
+                if start_idx == 0:
+                    # 清空记忆缓存
+                    for blk in self.netG.transformer:
+                        try:
+                            # 清空有记忆力的层的记忆缓存
+                            blk.attn.m_k = []
+                            blk.attn.m_v = []
+                        except:
+                            pass
+
+            # # 就让你等于之前的mask_dict就完事了，反正到了新视频会重新生成
+            # self.train_loader.dataset.random_dict_list = mask_dict
+            # self.train_dataset.random_dict_list = mask_dict
+
+            # # debug
+            # video_index_list.append(index)
+            # start_index_list.append(start_index)
+            # video_name_list.append(video_name)
+            # ii += 1
+            # if new_mask[0]:
+            #     new_flag_0 = 1
+            # else:
+            #     new_flag_0 = 0
+            # if new_mask[1]:
+            #     new_flag_1 = 1
+            # else:
+            #     new_flag_1 = 0
+            # try:
+            #     print('-' * 50)
+            #     print('[Bacth 0] Video Index: %d, Start Frame Index: %d, New Mask: %d '
+            #           '|| [Bacth 1] Video Index: %d, Start Frame Index: %d, New Mask: %d|| iter: %d'
+            #           % (index[0], start_index[0], new_flag_0, index[1], start_index[1], new_flag_1, ii))
+            #     # print('[Bacth 2] Video Index: %d, Start Frame Index: %d || [Bacth 3] Video Index: %d, Start Frame Index: %d || iter: %d'
+            #     #       % (index[2], start_index[2], index[3], start_index[3], ii))
+            #     print('-'*50)
+            # except:
+            #     pass
+            # if ii > 100:
             #     break
 
             frames, masks = frames.to(device), masks.to(device)
