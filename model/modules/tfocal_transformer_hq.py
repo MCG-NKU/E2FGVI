@@ -2580,7 +2580,8 @@ class Decoupled3DFocalAttentionMem(nn.Module):
     def __init__(self, dim, expand_size, window_size, focal_window,
                  focal_level, num_heads, qkv_bias,
                  memory, max_mem_len, compression_factor, mem_pool, store_lf, align_cache, sub_token_align, sub_factor,
-                 cross_att, time_att, time_deco, temp_focal, cs_win, mem_att, cs_focal, cs_focal_v2, cs_win_strip):
+                 cross_att, time_att, time_deco, temp_focal, cs_win, mem_att, cs_focal, cs_focal_v2, cs_win_strip,
+                 conv_path):
 
         super().__init__()
         self.dim = dim
@@ -2605,6 +2606,7 @@ class Decoupled3DFocalAttentionMem(nn.Module):
         self.mem_att = mem_att
         self.cs_focal = cs_focal
         self.cs_focal_v2 = cs_focal_v2
+        self.conv_path = conv_path
 
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
 
@@ -2696,6 +2698,19 @@ class Decoupled3DFocalAttentionMem(nn.Module):
                         # cs win 的线性层
                         self.cs_proj = nn.Linear(dim, dim)
 
+                        # 是否额外给cswin cross attention增加一个CONV Path
+                        if self.conv_path:
+                            self.parallel_conv_cross = nn.Sequential(
+                                nn.Hardswish(inplace=False),
+                                nn.Conv2d(
+                                    dim,
+                                    dim,
+                                    kernel_size=3,
+                                    padding=1,
+                                    groups=dim,
+                                ),
+                            )
+
             else:
                 # memory机制的含参数运算层-[基于池化的压缩]
                 # 全连接池化层 如果使用token缩减，将4替换为缩减比例*4
@@ -2759,7 +2774,7 @@ class Decoupled3DFocalAttentionMem(nn.Module):
                 self.m_k_aligned = []  # 缓存的已对齐memory keys
                 self.m_v_aligned = []  # 缓存的已对齐memory keys
 
-        # 使用 cs win attention 作为self attention
+        # ====使用 cs win attention 作为self attention====
         window_stride = 4  # 每个window在两个方向上占用了多少个token
         split_size = cs_win_strip  # 条形窗口的宽度
         num_heads_cs = num_heads // 2
@@ -2786,6 +2801,19 @@ class Decoupled3DFocalAttentionMem(nn.Module):
             self.self_proj_t = nn.Linear(dim, dim)
         # cs win 的线性层
         self.self_proj = nn.Linear(dim, dim)
+
+        # 是否额外给cswin self attention增加一个CONV Path
+        if self.conv_path:
+            self.parallel_conv_self = nn.Sequential(
+                nn.Hardswish(inplace=False),
+                nn.Conv2d(
+                    dim,
+                    dim,
+                    kernel_size=3,
+                    padding=1,
+                    groups=dim,
+                ),
+            )
 
     def forward(self, x, mask_all=None, l_t=5):
         """
@@ -2917,7 +2945,7 @@ class Decoupled3DFocalAttentionMem(nn.Module):
                                         mem_k = cm_k
                                         mem_v = cm_v
 
-                            # 各种不同的cross attention选择
+                            # ===各种不同的cross attention选择===
                             if not self.time_att:
                                 # 信息只在Nh Nw维度流动(空间维度)
                                 q = q.reshape(B * T, self.num_heads, nH * nW, C // self.num_heads).contiguous()
@@ -2977,7 +3005,7 @@ class Decoupled3DFocalAttentionMem(nn.Module):
                                     cm_x = self.cf_att(qkv=[q, mem_k, mem_v], mask_all=mask_all)
 
                                 elif self.cs_win:
-                                    # 基于cswin attention聚合时空记忆和当前迭代
+                                    # ===基于cswin attention聚合时空记忆和当前迭代===
 
                                     if self.time_deco:
                                         # 解耦时间和空间聚合，时间聚合使用vanilla attention
@@ -3003,6 +3031,16 @@ class Decoupled3DFocalAttentionMem(nn.Module):
                                         mem_v = mem_v.permute(0, 2, 3, 1).reshape(B, nH, nW, T, C).permute(0, 3, 1, 2,
                                                                                                            4).contiguous()
 
+                                    # 是否加上CONV Path
+                                    if self.conv_path:
+                                        # 记忆v的short path
+                                        mem_v_conv = \
+                                            self.parallel_conv_cross(mem_v.reshape(B*T, nH, nW, C).permute(0, 3, 1, 2)
+                                                                     .contiguous())
+                                        # reshape mem_v_conv B*T, C, H, W -> B, T, H, W, C
+                                        mem_v_conv = mem_v_conv.permute(0, 2, 3, 1).contiguous()\
+                                            .reshape(B, T * nH * nW, C)
+
                                     cm_x1 = self.cs_att[0](qkv=[q[:, :, :, :, :C // 2],
                                                                 mem_k[:, :, :, :, :C // 2],
                                                                 mem_v[:, :, :, :, :C // 2]])
@@ -3010,6 +3048,11 @@ class Decoupled3DFocalAttentionMem(nn.Module):
                                                                 mem_k[:, :, :, :, C // 2:],
                                                                 mem_v[:, :, :, :, C // 2:]])
                                     cm_x = torch.cat([cm_x1, cm_x2], dim=2)
+
+                                    # 是否加上CONV Path
+                                    if self.conv_path:
+                                        cm_x = cm_x.add(mem_v_conv)
+
                                     cm_x = self.cs_proj(cm_x)
 
                                     if self.time_deco:
@@ -3294,7 +3337,7 @@ class Decoupled3DFocalAttentionMem(nn.Module):
             # qkv[0], qkv[1], qkv[2] = q_temp, k_temp, v_temp
 
         # self attention
-        # 基于cswin attention进行自注意力
+        # ===基于cswin attention进行自注意力===
         # 时间自注意力
         if self.time_deco:
             # 解耦时间和空间聚合，时间聚合使用vanilla attention
@@ -3316,6 +3359,15 @@ class Decoupled3DFocalAttentionMem(nn.Module):
             q = q.permute(0, 2, 3, 1).reshape(B, nH, nW, T, C).permute(0, 3, 1, 2, 4).contiguous()
             k = k.permute(0, 2, 3, 1).reshape(B, nH, nW, T, C).permute(0, 3, 1, 2, 4).contiguous()
             v = v.permute(0, 2, 3, 1).reshape(B, nH, nW, T, C).permute(0, 3, 1, 2, 4).contiguous()
+
+        # 是否加上CONV Path
+        if self.conv_path:
+            # 当前v的short path
+            v_conv = \
+                self.parallel_conv_self(v.reshape(B * T, nH, nW, C).permute(0, 3, 1, 2).contiguous())
+            # reshape v_conv B*T, C, H, W -> B, T, H, W, C -> B, T*H*W, C
+            v_conv = v_conv.permute(0, 2, 3, 1).contiguous().reshape(B, T * nH * nW, C)
+
         # 空间自注意力
         self_x1 = self.self_attn[0](qkv=[q[:, :, :, :, :C // 2],
                                        k[:, :, :, :, :C // 2],
@@ -3324,6 +3376,11 @@ class Decoupled3DFocalAttentionMem(nn.Module):
                                        k[:, :, :, :, C // 2:],
                                        v[:, :, :, :, C // 2:]])
         self_x = torch.cat([self_x1, self_x2], dim=2)
+
+        # 是否加上CONV Path
+        if self.conv_path:
+            self_x = self_x.add(v_conv)
+
         self_x = self.self_proj(self_x)
 
         if self.time_deco:
@@ -3424,6 +3481,7 @@ class Decoupled3DFocalTransformerBlock(nn.Module):
                             Only work with cs_focal=True.
         cs_win_strip (int): cs win attention strip width. Default: 1.
         mix_f3n (bool): If True, use MixF3N replace F3N.
+        conv_path (bool): If True, add an additional conv path for attention.
     """
     def __init__(self,
                  dim,
@@ -3454,7 +3512,8 @@ class Decoupled3DFocalTransformerBlock(nn.Module):
                  cs_focal=False,
                  cs_focal_v2=False,
                  cs_win_strip=1,
-                 mix_f3n=False):
+                 mix_f3n=False,
+                 conv_path=False):
         super().__init__()
         self.dim = dim
         self.num_heads = num_heads
@@ -3496,7 +3555,8 @@ class Decoupled3DFocalTransformerBlock(nn.Module):
                                                      mem_att=mem_att,
                                                      cs_focal=cs_focal,
                                                      cs_focal_v2=cs_focal_v2,
-                                                     cs_win_strip=cs_win_strip)
+                                                     cs_win_strip=cs_win_strip,
+                                                     conv_path=conv_path)
         else:
             # 使用记忆增强的attention
             self.attn = Decoupled3DFocalAttentionMem(dim,
@@ -3522,7 +3582,8 @@ class Decoupled3DFocalTransformerBlock(nn.Module):
                                                      mem_att=mem_att,
                                                      cs_focal=cs_focal,
                                                      cs_focal_v2=cs_focal_v2,
-                                                     cs_win_strip=cs_win_strip)
+                                                     cs_win_strip=cs_win_strip,
+                                                     conv_path=conv_path)
 
         self.norm2 = norm_layer(dim)
 

@@ -218,6 +218,12 @@ class Trainer:
                 else:
                     self.mix_f3n = False
 
+                # 是否给attention加一个CONV path，目前仅对cs win trans block生效
+                if config['model']['conv_path'] != 0:
+                    self.conv_path = True
+                else:
+                    self.conv_path = False
+
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,
                     token_fusion_simple=self.token_fusion_simple, fusion_skip_connect=self.fusion_skip_connect,
@@ -228,7 +234,7 @@ class Trainer:
                     cross_att=self.cross_att, time_att=self.time_att, time_deco=self.time_deco,
                     temp_focal=self.temp_focal, cs_win=self.cs_win, mem_att=self.mem_att, cs_focal=self.cs_focal,
                     cs_focal_v2=self.cs_focal_v2, cs_win_strip=self.cs_win_strip, cs_trans=self.cs_trans,
-                    mix_f3n=self.mix_f3n)
+                    mix_f3n=self.mix_f3n, conv_path=self.conv_path)
             else:
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,

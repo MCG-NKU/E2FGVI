@@ -140,7 +140,7 @@ class InpaintGenerator(BaseNetwork):
                  memory=False, max_mem_len=8, compression_factor=4, mem_pool=False, store_lf=False, align_cache=False,
                  sub_token_align=False, sub_factor=1, half_memory=False, last_memory=False,
                  cross_att=False, time_att=False, time_deco=False, temp_focal=False, cs_win=False, mem_att=False,
-                 cs_focal=False, cs_focal_v2=False, cs_win_strip=1, cs_trans=False, mix_f3n=False):
+                 cs_focal=False, cs_focal_v2=False, cs_win_strip=1, cs_trans=False, mix_f3n=False, conv_path=False):
         super(InpaintGenerator, self).__init__()
         # channel = 256   # default
         # hidden = 512    # default
@@ -184,6 +184,7 @@ class InpaintGenerator(BaseNetwork):
         cs_win_strip = cs_win_strip                 # 决定了 cs win 的条带宽度，默认为1
         cs_trans = cs_trans                         # 如果为True，则使用我们增强的cswin替代temporal focal作为trans主干
         mix_f3n = mix_f3n                           # 如果为True，则使用MixF3N代替原本的F3N，目前仅对于cswin主干生效
+        conv_path = conv_path                       # 如果为True，则给attention额外引入CONV path，目前仅对于cswin生效
 
         # encoder
         # self.encoder = Encoder()    # default
@@ -372,7 +373,8 @@ class InpaintGenerator(BaseNetwork):
                                                              cs_focal=cs_focal,
                                                              cs_focal_v2=cs_focal_v2,
                                                              cs_win_strip=cs_win_strip,
-                                                             mix_f3n=mix_f3n),)
+                                                             mix_f3n=mix_f3n,
+                                                             conv_path=conv_path),)
                 elif half_memory:
                     # 只有一半的层有记忆
                     if (i + 1) % 2 == 0:
@@ -431,7 +433,8 @@ class InpaintGenerator(BaseNetwork):
                                                                  cs_focal=cs_focal,
                                                                  cs_focal_v2=cs_focal_v2,
                                                                  cs_win_strip=cs_win_strip,
-                                                                 mix_f3n=mix_f3n), )
+                                                                 mix_f3n=mix_f3n,
+                                                                 conv_path=conv_path), )
                     else:
                         # 奇数层没有记忆
                         if not cs_trans:
@@ -456,7 +459,8 @@ class InpaintGenerator(BaseNetwork):
                                                                  n_vecs=n_vecs,
                                                                  t2t_params=t2t_params,
                                                                  memory=False,
-                                                                 mix_f3n=mix_f3n), )
+                                                                 mix_f3n=mix_f3n,
+                                                                 conv_path=conv_path), )
                 elif last_memory:
                     # 只有最后一层有记忆力
                     if (i + 1) == depths:
@@ -515,7 +519,8 @@ class InpaintGenerator(BaseNetwork):
                                                                  cs_focal=cs_focal,
                                                                  cs_focal_v2=cs_focal_v2,
                                                                  cs_win_strip=cs_win_strip,
-                                                                 mix_f3n=mix_f3n), )
+                                                                 mix_f3n=mix_f3n,
+                                                                 conv_path=conv_path), )
                     else:
                         # 前面的层没有记忆
                         if not cs_trans:
@@ -540,7 +545,8 @@ class InpaintGenerator(BaseNetwork):
                                                                  n_vecs=n_vecs,
                                                                  t2t_params=t2t_params,
                                                                  memory=False,
-                                                                 mix_f3n=mix_f3n), )
+                                                                 mix_f3n=mix_f3n,
+                                                                 conv_path=conv_path), )
 
             self.transformer = nn.Sequential(*blocks)
         else:
