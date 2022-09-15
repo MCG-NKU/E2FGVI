@@ -224,6 +224,13 @@ class Trainer:
                 else:
                     self.conv_path = False
 
+                # 是否使用滑窗逻辑强化cs win，只对于条带宽度不为1时生效
+                # 顺便更改了条带宽度不为1的池化逻辑，直接池化到条带的宽度，提高数据利用率(原来补0)
+                if config['model']['cs_sw'] != 0:
+                    self.cs_sw = True
+                else:
+                    self.cs_sw = False
+
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,
                     token_fusion_simple=self.token_fusion_simple, fusion_skip_connect=self.fusion_skip_connect,
@@ -234,7 +241,7 @@ class Trainer:
                     cross_att=self.cross_att, time_att=self.time_att, time_deco=self.time_deco,
                     temp_focal=self.temp_focal, cs_win=self.cs_win, mem_att=self.mem_att, cs_focal=self.cs_focal,
                     cs_focal_v2=self.cs_focal_v2, cs_win_strip=self.cs_win_strip, cs_trans=self.cs_trans,
-                    mix_f3n=self.mix_f3n, conv_path=self.conv_path)
+                    mix_f3n=self.mix_f3n, conv_path=self.conv_path, cs_sw=self.cs_sw)
             else:
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,

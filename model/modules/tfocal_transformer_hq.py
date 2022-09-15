@@ -456,9 +456,10 @@ class TemporalLePEAttention(nn.Module):
             2. Extend CSWin to Temporal-CSWin.
             3. Enhance CSWin with global window attention with pooling and focal.
             temporal (bool): It True, extend CSWin to Temporal CSWin
-            cs_focal (bool): It True, extend CSWin with global window attention with pooling and focal"""
+            cs_focal (bool): It True, extend CSWin with global window attention with pooling and focal
+            cs_sw (bool): If True, extend CSWin with sliding window logic."""
     def __init__(self, dim, resolution, idx, split_size=7, dim_out=None, num_heads=8, attn_drop=0., proj_drop=0.,
-                 qk_scale=None, temporal=False, cs_focal=False, cs_focal_v2=False):
+                 qk_scale=None, temporal=False, cs_focal=False, cs_focal_v2=False, cs_sw=False):
         super().__init__()
         self.dim = dim
         self.dim_out = dim_out or dim
@@ -486,17 +487,52 @@ class TemporalLePEAttention(nn.Module):
         self.temporal = temporal
         self.cs_focal = cs_focal
         self.cs_focal_v2 = cs_focal_v2      # if true, the sliding window will has same direction of pooled feat
+        self.cs_sw = cs_sw
+
+        # 暂时不给滑窗做mask了
+        if self.cs_sw:
+            # 滑窗需要用到mask挡住原本不是这个区域的特征(循环过来的特征)
+            # 横向条带和纵向其实需要不同的滑窗方向以及mask
+            # 如果条带宽度为1，滑窗是没有意义的，报错
+            if self.split_size == 1:
+                raise Exception('Slide Window ONLY work with strip width > 1')
+            # 在两个方向上扩展的长度其实是一样的，而且每次只扩展一条直线上的特征
+            self.expand_size = [H_sp // 2, W_sp // 2]  # 窗口大小除以2是拓展大小
+
+        #     # H_sp等于纵向分辨率时，这个时候需要横向的滑窗，和横向的mask
+        #     # get mask for rolled k and rolled v
+        #     mask_l = torch.ones(H_sp,  W_sp)
+        #     mask_l[:, :-self.expand_size[1]] = 0
+        #     mask_u = torch.ones(H_sp,  W_sp)
+        #     mask_u[:-self.expand_size[0], :] = 0
+        #
+        #     # mask_rolled = torch.stack((mask_l, mask_u), 0).flatten(0)
+        #     # self.register_buffer("valid_ind_rolled",
+        #     #                      mask_rolled.nonzero(as_tuple=False).view(-1))
+        #     mask_rolled = torch.stack((mask_l, mask_u), 0).nonzero(as_tuple=False)
+        #     self.register_buffer("valid_ind_rolled", mask_rolled)
 
         if self.cs_focal:
             # 用于池化记忆kv的层
             # 使用线性层池化
-            self.pool_layers = nn.ModuleList()
-            window_size_glo = [self.H_sp, self.W_sp]
-            self.pool_layers.append(
-                nn.Linear(window_size_glo[0] * window_size_glo[1], 1))
-            self.pool_layers[-1].weight.data.fill_(
-                1. / (window_size_glo[0] * window_size_glo[1]))
-            self.pool_layers[-1].bias.data.fill_(0)
+            if not self.cs_sw:
+                # 池化到宽度为1
+                self.pool_layers = nn.ModuleList()
+                window_size_glo = [self.H_sp, self.W_sp]
+                self.pool_layers.append(
+                    nn.Linear(window_size_glo[0] * window_size_glo[1], 1))
+                self.pool_layers[-1].weight.data.fill_(
+                    1. / (window_size_glo[0] * window_size_glo[1]))
+                self.pool_layers[-1].bias.data.fill_(0)
+            else:
+                # 池化到宽度为条带的宽度
+                self.pool_layers = nn.ModuleList()
+                window_size_glo = [self.H_sp, self.W_sp]
+                self.pool_layers.append(
+                    nn.Linear(window_size_glo[0] * window_size_glo[1], self.split_size))
+                self.pool_layers[-1].weight.data.fill_(
+                    self.split_size / (window_size_glo[0] * window_size_glo[1]))
+                self.pool_layers[-1].bias.data.fill_(0)
 
             # 展开函数
             self.unfolds = nn.ModuleList()
@@ -535,17 +571,31 @@ class TemporalLePEAttention(nn.Module):
                         padding = [self.W_sp//2, 0]
                 else:
                     # 条形窗口宽度不为1
-                    # 此时池化完的特征宽度上也要padding，并且步幅必须为2
-                    self.focal_window = [self.W_sp, self.H_sp]      # 刚好和原来的窗口相反
-                    kernel_size = self.focal_window
-                    if idx == 0:
-                        # H_sp等于纵向分辨率时，考虑最后一个窗口需要pad H_sp-1, 注意padding是两边的
-                        padding = [self.W_sp//2, self.H_sp//2]
-                        stride = [2, 1]
-                    elif idx == 1:
-                        # 反之当横向的窗口大小等于横向分辨率时，考虑最后一个窗口需要pad W_sp-1, 注意padding是两边的
-                        padding = [self.W_sp//2, self.H_sp//2]
-                        stride = [1, 2]
+                    if not self.cs_sw:
+                        # 此时池化完的特征宽度上也要padding，并且步幅必须为2
+                        self.focal_window = [self.W_sp, self.H_sp]      # 刚好和原来的窗口相反
+                        kernel_size = self.focal_window
+                        if idx == 0:
+                            # H_sp等于纵向分辨率时，考虑最后一个窗口需要pad H_sp-1, 注意padding是两边的
+                            padding = [self.W_sp//2, self.H_sp//2]
+                            stride = [2, 1]
+                        elif idx == 1:
+                            # 反之当横向的窗口大小等于横向分辨率时，考虑最后一个窗口需要pad W_sp-1, 注意padding是两边的
+                            padding = [self.W_sp//2, self.H_sp//2]
+                            stride = [1, 2]
+                    else:
+                        # 宽度上不需要padding因为会池化到和条带宽度相同
+                        # 似乎和宽度为1的逻辑是一样的？
+                        self.focal_window = [self.W_sp, self.H_sp]      # 刚好和原来的窗口相反
+                        kernel_size = self.focal_window
+                        if idx == 0:
+                            # H_sp等于纵向分辨率时，考虑最后一个窗口需要pad H_sp-1, 注意padding是两边的
+                            padding = [0, self.H_sp//2]
+                            stride = [1, 1]
+                        elif idx == 1:
+                            # 反之当横向的窗口大小等于横向分辨率时，考虑最后一个窗口需要pad W_sp-1, 注意padding是两边的
+                            padding = [self.W_sp//2, 0]
+                            stride = [1, 1]
 
                 # define unfolding operations
                 # 保证unfold后的kv尺寸和原来一样 变向等于是展开了kv
@@ -565,6 +615,7 @@ class TemporalLePEAttention(nn.Module):
         x = x.transpose(-2, -1).contiguous().view(B, C, H, W)
         x = self.img2windows(x, self.H_sp, self.W_sp)
         x = x.reshape(-1, self.H_sp * self.W_sp, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3).contiguous()
+        # x: [-1, head, H_sp*W_sp, C/head]
         return x
 
     def img2windows(self, img, H_sp, W_sp):
@@ -661,7 +712,7 @@ class TemporalLePEAttention(nn.Module):
 
         # 池化kv用于获得global att
         if self.cs_focal:
-            nWh = H // self.H_sp
+            nWh = H // self.H_sp    # 窗口数量
             nWw = W // self.W_sp
 
             # 改变kv形状->B, nWh, nWw, T, C, window_size_h*window_size_w
@@ -674,9 +725,20 @@ class TemporalLePEAttention(nn.Module):
             k_pooled = self.pool_layers[0](k).flatten(-2)  # B, nWh, nWw, T, C
             v_pooled = self.pool_layers[0](v).flatten(-2)  # B, nWh, nWw, T, C
 
-            # 转化池化后的kv到需要的shape
-            k_pooled = k_pooled.permute(0, 3, 4, 1, 2).contiguous().reshape(B * T, C, nWh, nWw)  # B*T, C, nWh, nWw
-            v_pooled = v_pooled.permute(0, 3, 4, 1, 2).contiguous().reshape(B * T, C, nWh, nWw)  # B*T, C, nWh, nWw
+            if self.split_size == 1 or not self.cs_sw:
+                # 转化池化后的kv到需要的shape
+                k_pooled = k_pooled.permute(0, 3, 4, 1, 2).contiguous().reshape(B * T, C, nWh, nWw)  # B*T, C, nWh, nWw
+                v_pooled = v_pooled.permute(0, 3, 4, 1, 2).contiguous().reshape(B * T, C, nWh, nWw)  # B*T, C, nWh, nWw
+            else:
+                # 条带宽度不为1时池化的形状也不同
+                if self.idx == 0:
+                    # 纵向条纹，池化完是横向的
+                    k_pooled = k_pooled.permute(0, 3, 4, 1, 2).contiguous().reshape(B * T, C, nWh * self.split_size, nWw)  # B*T, C, nWh, nWw
+                    v_pooled = v_pooled.permute(0, 3, 4, 1, 2).contiguous().reshape(B * T, C, nWh * self.split_size, nWw)  # B*T, C, nWh, nWw
+                else:
+                    # 横向条纹，池化完是纵向的
+                    k_pooled = k_pooled.permute(0, 3, 4, 1, 2).contiguous().reshape(B * T, C, nWh, nWw * self.split_size)  # B*T, C, nWh, nWw
+                    v_pooled = v_pooled.permute(0, 3, 4, 1, 2).contiguous().reshape(B * T, C, nWh, nWw * self.split_size)  # B*T, C, nWh, nWw
 
             # 恢复kv形状->B, T, H, W, C
             k = k.reshape(B, nWh, nWw, T, C, self.H_sp, self.W_sp).permute(0, 3, 1, 5, 2, 6, 4)\
@@ -700,6 +762,72 @@ class TemporalLePEAttention(nn.Module):
             q = self.im2cswin(q)
             k = self.im2cswin(k)
             v, lepe = self.get_lepe(v, self.get_v)
+
+        # 滑窗逻辑
+        if self.cs_sw:
+            if self.idx == 0:
+                # H_sp等于纵向分辨率时，这个时候需要横向的滑窗
+                # 直接向左移动，在条带宽度为2时，向左或者向右滑动是一样的, 也就是在宽度方向上移动
+
+                # 先恢复回token
+                # B*T*H/H_sp*W/W_sp head H_sp*W_sp C/head -> B*T*H/H_sp*W/W_sp H_sp*W_sp C
+                k_l = k.transpose(1, 2).reshape(-1, self.H_sp * self.W_sp, C)
+                k_l = self.windows2img(k_l, self.H_sp, self.W_sp, H, W)  # B*T H W C
+                v_l = v.transpose(1, 2).reshape(-1, self.H_sp * self.W_sp, C)
+                v_l = self.windows2img(v_l, self.H_sp, self.W_sp, H, W)  # B*T H W C
+
+                # 先把token都移动了，然后再划分窗口，正值：向下/右移动，负值：向上/左移动
+                (k_l, v_l) = map(
+                    lambda t: torch.roll(t,
+                                         shifts=(0, -self.expand_size[1]),
+                                         dims=(1, 2)), (k_l, v_l))
+
+                # 划分一下窗口捏
+                # k_l: [-1, head, H_sp*W_sp, C/head]
+                k_l = self.im2cswin(k_l.reshape(B * T, H * W, C))
+                v_l = self.im2cswin(v_l.reshape(B * T, H * W, C))
+
+                # # 转换k_l, v_l到窗口个数的格式
+                # k_l = k_l.reshape(B, T, H // self.H_sp, W // self.W_sp, self.num_heads, self.H_sp * self.W_sp, C // self.num_heads)\
+                #     .permute(0, 5, 4, 1, 2, 3, 6).contiguous()\
+                #     .reshape(B * self.H_sp * self.W_sp, self.num_heads, T, H // self.H_sp * W // self.W_sp, C // self.num_heads)
+                # v_l = v_l.reshape(B, T, H // self.H_sp, W // self.W_sp, self.num_heads, self.H_sp * self.W_sp,
+                #                   C // self.num_heads) \
+                #     .permute(0, 5, 4, 1, 2, 3, 6).contiguous() \
+                #     .reshape(B * self.H_sp * self.W_sp, self.num_heads, T, H // self.H_sp * W // self.W_sp, C // self.num_heads)
+
+                # # mask掉同一个窗口内含有非局部特征的这些窗口
+                # k_rolled = k_l[:, :, :, self.valid_ind_rolled[0]]
+                # v_rolled = v_l[:, :, :, self.valid_ind_rolled[0]]
+                k_rolled = k_l
+                v_rolled = v_l
+            elif self.idx == 1:
+                # 当横向的窗口大小等于横向分辨率时，这个时候需要竖直方向的位移和滑窗
+                # 直接向上移动，在条带宽度为2时，向上或者向下滑动是一样的
+
+                # 先恢复回token
+                # B*T*H/H_sp*W/W_sp head H_sp*W_sp C/head -> B*T*H/H_sp*W/W_sp H_sp*W_sp C
+                k_u = k.transpose(1, 2).reshape(-1, self.H_sp * self.W_sp, C)
+                k_u = self.windows2img(k_u, self.H_sp, self.W_sp, H, W)  # B*T H W C
+                v_u = v.transpose(1, 2).reshape(-1, self.H_sp * self.W_sp, C)
+                v_u = self.windows2img(v_u, self.H_sp, self.W_sp, H, W)  # B*T H W C
+
+                # 先把token都移动了，然后再划分窗口，正值：向下/右移动，负值：向上/左移动
+                (k_u, v_u) = map(
+                    lambda t: torch.roll(t,
+                                         shifts=(-self.expand_size[0], 0),
+                                         dims=(1, 2)), (k_u, v_u))
+
+                # 划分一下窗口捏
+                # k_l: [-1, head, H_sp*W_sp, C/head]
+                k_u = self.im2cswin(k_u.reshape(B * T, H * W, C))
+                v_u = self.im2cswin(v_u.reshape(B * T, H * W, C))
+
+                # # 挡住没用的窗口，因为有的元素是循环的。
+                # k_rolled = k_u[:, :, self.valid_ind_rolled[1]]
+                # v_rolled = v_u[:, :, self.valid_ind_rolled[1]]
+                k_rolled = k_u
+                v_rolled = v_u
 
         # 利用池化kv增强kv
         if self.cs_focal:
@@ -786,6 +914,11 @@ class TemporalLePEAttention(nn.Module):
             # 增强kv
             k = torch.cat((k, k_pooled), dim=2)
             v = torch.cat((v, v_pooled), dim=2)
+
+        # 利用滑窗kv增强kv
+        if self.cs_sw:
+            k = torch.cat((k, k_rolled), dim=2)
+            v = torch.cat((v, v_rolled), dim=2)
 
         q = q * self.scale
         attn = (q @ k.transpose(-2, -1))  # B head N C @ B head C N --> B head N N
@@ -2581,7 +2714,7 @@ class Decoupled3DFocalAttentionMem(nn.Module):
                  focal_level, num_heads, qkv_bias,
                  memory, max_mem_len, compression_factor, mem_pool, store_lf, align_cache, sub_token_align, sub_factor,
                  cross_att, time_att, time_deco, temp_focal, cs_win, mem_att, cs_focal, cs_focal_v2, cs_win_strip,
-                 conv_path):
+                 conv_path, cs_sw):
 
         super().__init__()
         self.dim = dim
@@ -2607,6 +2740,7 @@ class Decoupled3DFocalAttentionMem(nn.Module):
         self.cs_focal = cs_focal
         self.cs_focal_v2 = cs_focal_v2
         self.conv_path = conv_path
+        self.cs_sw = cs_sw
 
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
 
@@ -2683,7 +2817,8 @@ class Decoupled3DFocalAttentionMem(nn.Module):
                                 TemporalLePEAttention(dim//2, resolution=patches_resolution, idx=i,
                                                       split_size=split_size, num_heads=num_heads_cs, dim_out=dim//2,
                                                       qk_scale=None, attn_drop=0., proj_drop=0.,
-                                                      temporal=True, cs_focal=cs_focal, cs_focal_v2=cs_focal_v2)
+                                                      temporal=True, cs_focal=cs_focal, cs_focal_v2=cs_focal_v2,
+                                                      cs_sw=cs_sw)
                                 for i in range(0, 2)])      # 两个，一个横向一个纵向
                         elif self.time_deco:
                             # 解耦时间和空间注意力
@@ -2691,7 +2826,8 @@ class Decoupled3DFocalAttentionMem(nn.Module):
                                 TemporalLePEAttention(dim//2, resolution=patches_resolution, idx=i,
                                                       split_size=split_size, num_heads=num_heads_cs, dim_out=dim//2,
                                                       qk_scale=None, attn_drop=0., proj_drop=0.,
-                                                      temporal=False, cs_focal=cs_focal, cs_focal_v2=cs_focal_v2)
+                                                      temporal=False, cs_focal=cs_focal, cs_focal_v2=cs_focal_v2,
+                                                      cs_sw=cs_sw)
                                 for i in range(0, 2)])      # 两个，一个横向一个纵向
                             # 时间attention的线性层
                             self.cm_proj_t = nn.Linear(dim, dim)
@@ -2787,7 +2923,8 @@ class Decoupled3DFocalAttentionMem(nn.Module):
                 TemporalLePEAttention(dim // 2, resolution=patches_resolution, idx=i,
                                       split_size=split_size, num_heads=num_heads_cs, dim_out=dim // 2,
                                       qk_scale=None, attn_drop=0., proj_drop=0.,
-                                      temporal=True, cs_focal=cs_focal, cs_focal_v2=cs_focal_v2)
+                                      temporal=True, cs_focal=cs_focal, cs_focal_v2=cs_focal_v2,
+                                      cs_sw=cs_sw)
                 for i in range(0, 2)])  # 两个，一个横向一个纵向
         elif self.time_deco:
             # 解耦时间和空间注意力
@@ -2795,7 +2932,8 @@ class Decoupled3DFocalAttentionMem(nn.Module):
                 TemporalLePEAttention(dim // 2, resolution=patches_resolution, idx=i,
                                       split_size=split_size, num_heads=num_heads_cs, dim_out=dim // 2,
                                       qk_scale=None, attn_drop=0., proj_drop=0.,
-                                      temporal=False, cs_focal=cs_focal, cs_focal_v2=cs_focal_v2)
+                                      temporal=False, cs_focal=cs_focal, cs_focal_v2=cs_focal_v2,
+                                      cs_sw=cs_sw)
                 for i in range(0, 2)])  # 两个，一个横向一个纵向
             # 时间attention的线性层
             self.self_proj_t = nn.Linear(dim, dim)
@@ -3482,6 +3620,7 @@ class Decoupled3DFocalTransformerBlock(nn.Module):
         cs_win_strip (int): cs win attention strip width. Default: 1.
         mix_f3n (bool): If True, use MixF3N replace F3N.
         conv_path (bool): If True, add an additional conv path for attention.
+        cs_sw (bool): If True, use sliding window logic to upgrade cswin attention.
     """
     def __init__(self,
                  dim,
@@ -3513,7 +3652,8 @@ class Decoupled3DFocalTransformerBlock(nn.Module):
                  cs_focal_v2=False,
                  cs_win_strip=1,
                  mix_f3n=False,
-                 conv_path=False):
+                 conv_path=False,
+                 cs_sw=False):
         super().__init__()
         self.dim = dim
         self.num_heads = num_heads
@@ -3556,7 +3696,8 @@ class Decoupled3DFocalTransformerBlock(nn.Module):
                                                      cs_focal=cs_focal,
                                                      cs_focal_v2=cs_focal_v2,
                                                      cs_win_strip=cs_win_strip,
-                                                     conv_path=conv_path)
+                                                     conv_path=conv_path,
+                                                     cs_sw=cs_sw)
         else:
             # 使用记忆增强的attention
             self.attn = Decoupled3DFocalAttentionMem(dim,
@@ -3583,7 +3724,8 @@ class Decoupled3DFocalTransformerBlock(nn.Module):
                                                      cs_focal=cs_focal,
                                                      cs_focal_v2=cs_focal_v2,
                                                      cs_win_strip=cs_win_strip,
-                                                     conv_path=conv_path)
+                                                     conv_path=conv_path,
+                                                     cs_sw=cs_sw)
 
         self.norm2 = norm_layer(dim)
 
