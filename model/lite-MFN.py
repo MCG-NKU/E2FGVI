@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from model.modules.flow_comp_MFN import MaskFlowNetS
 from model.modules.feat_prop import BidirectionalPropagation, SecondOrderDeformableAlignment
 from model.modules.tfocal_transformer_hq import TemporalFocalTransformerBlock, SoftSplit, SoftComp,\
-    SoftSplit_FlowGuide, TokenSlimmingModule, ReverseTSM, ReverseTSM_v2
+    SoftSplit_FlowGuide, TokenSlimmingModule, ReverseTSM, ReverseTSM_v2, Decoupled3DFocalTransformerBlock
 from model.modules.spectral_norm import spectral_norm as _spectral_norm
 
 
@@ -140,7 +140,7 @@ class InpaintGenerator(BaseNetwork):
                  memory=False, max_mem_len=8, compression_factor=4, mem_pool=False, store_lf=False, align_cache=False,
                  sub_token_align=False, sub_factor=1, half_memory=False, last_memory=False,
                  cross_att=False, time_att=False, time_deco=False, temp_focal=False, cs_win=False, mem_att=False,
-                 cs_focal=False, cs_focal_v2=False, cs_win_strip=1):
+                 cs_focal=False, cs_focal_v2=False, cs_win_strip=1, cs_trans=False):
         super(InpaintGenerator, self).__init__()
         # channel = 256   # default
         # hidden = 512    # default
@@ -182,6 +182,7 @@ class InpaintGenerator(BaseNetwork):
         cs_focal = cs_focal                         # 如果为True，则为cs win增强池化的focal机制
         cs_focal_v2 = cs_focal_v2                   # 如果为True，则cs win的focal基于与池化完的张量方向相同的滑窗实现
         cs_win_strip = cs_win_strip                 # 决定了 cs win 的条带宽度，默认为1
+        cs_trans = cs_trans                         # 如果为True，则使用我们增强的cswin替代temporal focal作为trans主干
 
         # encoder
         # self.encoder = Encoder()    # default
@@ -315,116 +316,225 @@ class InpaintGenerator(BaseNetwork):
             for i in range(depths):
                 if not (half_memory or last_memory):
                     # 所有的层都有记忆
-                    blocks.append(
-                        TemporalFocalTransformerBlock(dim=hidden,
-                                                      num_heads=num_heads[i],
-                                                      window_size=window_size[i],
-                                                      focal_level=focal_levels[i],
-                                                      focal_window=focal_windows[i],
-                                                      n_vecs=n_vecs,
-                                                      t2t_params=t2t_params,
-                                                      pool_method=pool_method,
-                                                      memory=self.memory,
-                                                      max_mem_len=max_mem_len,
-                                                      compression_factor=compression_factor,
-                                                      mem_pool=mem_pool,
-                                                      store_lf=store_lf,
-                                                      align_cache=align_cache,
-                                                      sub_token_align=sub_token_align,
-                                                      sub_factor=sub_factor,
-                                                      cross_att=cross_att,
-                                                      time_att=time_att,
-                                                      time_deco=time_deco,
-                                                      temp_focal=temp_focal,
-                                                      cs_win=cs_win,
-                                                      mem_att=mem_att,
-                                                      cs_focal=cs_focal,
-                                                      cs_focal_v2=cs_focal_v2,
-                                                      cs_win_strip=cs_win_strip),)
+                    if not cs_trans:
+                        # 使用tf trans主干
+                        blocks.append(
+                            TemporalFocalTransformerBlock(dim=hidden,
+                                                          num_heads=num_heads[i],
+                                                          window_size=window_size[i],
+                                                          focal_level=focal_levels[i],
+                                                          focal_window=focal_windows[i],
+                                                          n_vecs=n_vecs,
+                                                          t2t_params=t2t_params,
+                                                          pool_method=pool_method,
+                                                          memory=self.memory,
+                                                          max_mem_len=max_mem_len,
+                                                          compression_factor=compression_factor,
+                                                          mem_pool=mem_pool,
+                                                          store_lf=store_lf,
+                                                          align_cache=align_cache,
+                                                          sub_token_align=sub_token_align,
+                                                          sub_factor=sub_factor,
+                                                          cross_att=cross_att,
+                                                          time_att=time_att,
+                                                          time_deco=time_deco,
+                                                          temp_focal=temp_focal,
+                                                          cs_win=cs_win,
+                                                          mem_att=mem_att,
+                                                          cs_focal=cs_focal,
+                                                          cs_focal_v2=cs_focal_v2,
+                                                          cs_win_strip=cs_win_strip),)
+                    else:
+                        # 使用cs win主干
+                        blocks.append(
+                            Decoupled3DFocalTransformerBlock(dim=hidden,
+                                                             num_heads=num_heads[i],
+                                                             window_size=window_size[i],
+                                                             focal_level=focal_levels[i],
+                                                             focal_window=focal_windows[i],
+                                                             n_vecs=n_vecs,
+                                                             t2t_params=t2t_params,
+                                                             memory=self.memory,
+                                                             max_mem_len=max_mem_len,
+                                                             compression_factor=compression_factor,
+                                                             mem_pool=mem_pool,
+                                                             store_lf=store_lf,
+                                                             align_cache=align_cache,
+                                                             sub_token_align=sub_token_align,
+                                                             sub_factor=sub_factor,
+                                                             cross_att=cross_att,
+                                                             time_att=time_att,
+                                                             time_deco=time_deco,
+                                                             temp_focal=temp_focal,
+                                                             cs_win=cs_win,
+                                                             mem_att=mem_att,
+                                                             cs_focal=cs_focal,
+                                                             cs_focal_v2=cs_focal_v2,
+                                                             cs_win_strip=cs_win_strip),)
                 elif half_memory:
                     # 只有一半的层有记忆
                     if (i + 1) % 2 == 0:
                         # 偶数层(包括最后一层有记忆力)
-                        blocks.append(
-                            TemporalFocalTransformerBlock(dim=hidden,
-                                                          num_heads=num_heads[i],
-                                                          window_size=window_size[i],
-                                                          focal_level=focal_levels[i],
-                                                          focal_window=focal_windows[i],
-                                                          n_vecs=n_vecs,
-                                                          t2t_params=t2t_params,
-                                                          pool_method=pool_method,
-                                                          memory=self.memory,
-                                                          max_mem_len=max_mem_len,
-                                                          compression_factor=compression_factor,
-                                                          mem_pool=mem_pool,
-                                                          store_lf=store_lf,
-                                                          align_cache=align_cache,
-                                                          sub_token_align=sub_token_align,
-                                                          sub_factor=sub_factor,
-                                                          cross_att=cross_att,
-                                                          time_att=time_att,
-                                                          time_deco=time_deco,
-                                                          temp_focal=temp_focal,
-                                                          cs_win=cs_win,
-                                                          mem_att=mem_att,
-                                                          cs_focal=cs_focal,
-                                                          cs_focal_v2=cs_focal_v2,
-                                                          cs_win_strip=cs_win_strip), )
+                        if not cs_trans:
+                            blocks.append(
+                                TemporalFocalTransformerBlock(dim=hidden,
+                                                              num_heads=num_heads[i],
+                                                              window_size=window_size[i],
+                                                              focal_level=focal_levels[i],
+                                                              focal_window=focal_windows[i],
+                                                              n_vecs=n_vecs,
+                                                              t2t_params=t2t_params,
+                                                              pool_method=pool_method,
+                                                              memory=self.memory,
+                                                              max_mem_len=max_mem_len,
+                                                              compression_factor=compression_factor,
+                                                              mem_pool=mem_pool,
+                                                              store_lf=store_lf,
+                                                              align_cache=align_cache,
+                                                              sub_token_align=sub_token_align,
+                                                              sub_factor=sub_factor,
+                                                              cross_att=cross_att,
+                                                              time_att=time_att,
+                                                              time_deco=time_deco,
+                                                              temp_focal=temp_focal,
+                                                              cs_win=cs_win,
+                                                              mem_att=mem_att,
+                                                              cs_focal=cs_focal,
+                                                              cs_focal_v2=cs_focal_v2,
+                                                              cs_win_strip=cs_win_strip), )
+                        else:
+                            # 使用cs win主干
+                            blocks.append(
+                                Decoupled3DFocalTransformerBlock(dim=hidden,
+                                                                 num_heads=num_heads[i],
+                                                                 window_size=window_size[i],
+                                                                 focal_level=focal_levels[i],
+                                                                 focal_window=focal_windows[i],
+                                                                 n_vecs=n_vecs,
+                                                                 t2t_params=t2t_params,
+                                                                 memory=self.memory,
+                                                                 max_mem_len=max_mem_len,
+                                                                 compression_factor=compression_factor,
+                                                                 mem_pool=mem_pool,
+                                                                 store_lf=store_lf,
+                                                                 align_cache=align_cache,
+                                                                 sub_token_align=sub_token_align,
+                                                                 sub_factor=sub_factor,
+                                                                 cross_att=cross_att,
+                                                                 time_att=time_att,
+                                                                 time_deco=time_deco,
+                                                                 temp_focal=temp_focal,
+                                                                 cs_win=cs_win,
+                                                                 mem_att=mem_att,
+                                                                 cs_focal=cs_focal,
+                                                                 cs_focal_v2=cs_focal_v2,
+                                                                 cs_win_strip=cs_win_strip), )
                     else:
                         # 奇数层没有记忆
-                        blocks.append(
-                            TemporalFocalTransformerBlock(dim=hidden,
-                                                          num_heads=num_heads[i],
-                                                          window_size=window_size[i],
-                                                          focal_level=focal_levels[i],
-                                                          focal_window=focal_windows[i],
-                                                          n_vecs=n_vecs,
-                                                          t2t_params=t2t_params,
-                                                          pool_method=pool_method,
-                                                          memory=False))
+                        if not cs_trans:
+                            blocks.append(
+                                TemporalFocalTransformerBlock(dim=hidden,
+                                                              num_heads=num_heads[i],
+                                                              window_size=window_size[i],
+                                                              focal_level=focal_levels[i],
+                                                              focal_window=focal_windows[i],
+                                                              n_vecs=n_vecs,
+                                                              t2t_params=t2t_params,
+                                                              pool_method=pool_method,
+                                                              memory=False))
+                        else:
+                            # 使用cs win主干
+                            blocks.append(
+                                Decoupled3DFocalTransformerBlock(dim=hidden,
+                                                                 num_heads=num_heads[i],
+                                                                 window_size=window_size[i],
+                                                                 focal_level=focal_levels[i],
+                                                                 focal_window=focal_windows[i],
+                                                                 n_vecs=n_vecs,
+                                                                 t2t_params=t2t_params,
+                                                                 memory=False), )
                 elif last_memory:
                     # 只有最后一层有记忆力
                     if (i + 1) == depths:
                         # 最后一层有记忆力
-                        blocks.append(
-                            TemporalFocalTransformerBlock(dim=hidden,
-                                                          num_heads=num_heads[i],
-                                                          window_size=window_size[i],
-                                                          focal_level=focal_levels[i],
-                                                          focal_window=focal_windows[i],
-                                                          n_vecs=n_vecs,
-                                                          t2t_params=t2t_params,
-                                                          pool_method=pool_method,
-                                                          memory=self.memory,
-                                                          max_mem_len=max_mem_len,
-                                                          compression_factor=compression_factor,
-                                                          mem_pool=mem_pool,
-                                                          store_lf=store_lf,
-                                                          align_cache=align_cache,
-                                                          sub_token_align=sub_token_align,
-                                                          sub_factor=sub_factor,
-                                                          cross_att=cross_att,
-                                                          time_att=time_att,
-                                                          time_deco=time_deco,
-                                                          temp_focal=temp_focal,
-                                                          cs_win=cs_win,
-                                                          mem_att=mem_att,
-                                                          cs_focal=cs_focal,
-                                                          cs_focal_v2=cs_focal_v2,
-                                                          cs_win_strip=cs_win_strip), )
+                        if not cs_trans:
+                            blocks.append(
+                                TemporalFocalTransformerBlock(dim=hidden,
+                                                              num_heads=num_heads[i],
+                                                              window_size=window_size[i],
+                                                              focal_level=focal_levels[i],
+                                                              focal_window=focal_windows[i],
+                                                              n_vecs=n_vecs,
+                                                              t2t_params=t2t_params,
+                                                              pool_method=pool_method,
+                                                              memory=self.memory,
+                                                              max_mem_len=max_mem_len,
+                                                              compression_factor=compression_factor,
+                                                              mem_pool=mem_pool,
+                                                              store_lf=store_lf,
+                                                              align_cache=align_cache,
+                                                              sub_token_align=sub_token_align,
+                                                              sub_factor=sub_factor,
+                                                              cross_att=cross_att,
+                                                              time_att=time_att,
+                                                              time_deco=time_deco,
+                                                              temp_focal=temp_focal,
+                                                              cs_win=cs_win,
+                                                              mem_att=mem_att,
+                                                              cs_focal=cs_focal,
+                                                              cs_focal_v2=cs_focal_v2,
+                                                              cs_win_strip=cs_win_strip), )
+                        else:
+                            # 使用cs win主干
+                            blocks.append(
+                                Decoupled3DFocalTransformerBlock(dim=hidden,
+                                                                 num_heads=num_heads[i],
+                                                                 window_size=window_size[i],
+                                                                 focal_level=focal_levels[i],
+                                                                 focal_window=focal_windows[i],
+                                                                 n_vecs=n_vecs,
+                                                                 t2t_params=t2t_params,
+                                                                 memory=self.memory,
+                                                                 max_mem_len=max_mem_len,
+                                                                 compression_factor=compression_factor,
+                                                                 mem_pool=mem_pool,
+                                                                 store_lf=store_lf,
+                                                                 align_cache=align_cache,
+                                                                 sub_token_align=sub_token_align,
+                                                                 sub_factor=sub_factor,
+                                                                 cross_att=cross_att,
+                                                                 time_att=time_att,
+                                                                 time_deco=time_deco,
+                                                                 temp_focal=temp_focal,
+                                                                 cs_win=cs_win,
+                                                                 mem_att=mem_att,
+                                                                 cs_focal=cs_focal,
+                                                                 cs_focal_v2=cs_focal_v2,
+                                                                 cs_win_strip=cs_win_strip), )
                     else:
                         # 前面的层没有记忆
-                        blocks.append(
-                            TemporalFocalTransformerBlock(dim=hidden,
-                                                          num_heads=num_heads[i],
-                                                          window_size=window_size[i],
-                                                          focal_level=focal_levels[i],
-                                                          focal_window=focal_windows[i],
-                                                          n_vecs=n_vecs,
-                                                          t2t_params=t2t_params,
-                                                          pool_method=pool_method,
-                                                          memory=False))
+                        if not cs_trans:
+                            blocks.append(
+                                TemporalFocalTransformerBlock(dim=hidden,
+                                                              num_heads=num_heads[i],
+                                                              window_size=window_size[i],
+                                                              focal_level=focal_levels[i],
+                                                              focal_window=focal_windows[i],
+                                                              n_vecs=n_vecs,
+                                                              t2t_params=t2t_params,
+                                                              pool_method=pool_method,
+                                                              memory=False))
+                        else:
+                            # 使用cs win主干
+                            blocks.append(
+                                Decoupled3DFocalTransformerBlock(dim=hidden,
+                                                                 num_heads=num_heads[i],
+                                                                 window_size=window_size[i],
+                                                                 focal_level=focal_levels[i],
+                                                                 focal_window=focal_windows[i],
+                                                                 n_vecs=n_vecs,
+                                                                 t2t_params=t2t_params,
+                                                                 memory=False), )
 
             self.transformer = nn.Sequential(*blocks)
         else:

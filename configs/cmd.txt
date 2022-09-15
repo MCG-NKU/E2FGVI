@@ -640,11 +640,15 @@ All average forward run time: (0.049149) per frame[矩池云3090]
 17.large-MFN-T1C1-HalfMem-csT-tf 基于本地3090测试 可以单卡正常训练 但是速度非常非常慢
 18.large-MFN-T1C1-csT-tf 基于本地3090测试 爆显存
 
+19.large-MFN-T1C1-LastMem-csT-deco-csfv2-cstrans 基于本地3090测试 可以单卡正常训练
+20.large-MFN-T1C1-HalfMem-csT-deco-csfv2-cstrans 基于本地3090测试 可以单卡正常训练
+21.large-MFN-T1C1-csT-deco-csfv2-cstrans 基于本地3090测试 可以单卡正常训练
+
 
 
 # 实现基于窗口cross attention的记忆力聚合 [未开始]
 
-# 实现基于temporal focal cross att的时空记忆聚合 [已完成] 需要47h   #BEST#
+# 实现基于temporal focal cross att的时空记忆聚合 [已完成] 需要47h
 # 这里直接对记忆缓存的kv进行池化来完成global att的编码
 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-tf.json
 默认的半滑窗逻辑测试：
@@ -761,25 +765,71 @@ All average forward run time: (0.023590) per frame[3090Ti]
 CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-cs/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
 [250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.23/0.9423/0.214
 All average forward run time: (0.045619) per frame[3090Ti]
-推理两次精度能救回来一点，但是比tf的29.46还是有很大的差距
+推理两次精度能救回来一点，但是比tf的29.44还是有很大的差距
 
-# 实现基于deco cs win直接对齐多个记忆张量，而不是先聚合记忆，再做cross attention(对于记忆时长大于1的情况) [tmux 0] 约需要55.5h
+# 实现基于deco cs win直接对齐多个记忆张量，而不是先聚合记忆，再做cross attention(对于记忆时长大于1的情况) [已完成] 需要50.7h
 # mem_att 表示直接用cross attention把不同时间的记忆和当前特征聚合，而不是先用线性层聚合记忆再和当前cross att
 # 相同的设置使用大模型似乎无法开启训练 也可能是矩池云的3090可用显存比较小
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T2C1-LastMem-csT-deco-cs-mem_att.json
+默认的半滑窗逻辑测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T2C1-LastMem-csT-deco-cs-mem_att/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.77/0.9414/0.238
+All average forward run time: (0.055565) per frame[矩池云3090]
+还不如记忆一次。。。可能定制越多，对于输入的行为越敏感吧。
+序列测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T2C1-LastMem-csT-deco-cs-mem_att/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.04/0.9411/0.256
+All average forward run time: (0.025718) per frame[矩池云3090]
+还是比记忆一次要高0.06的，嗯，但是依然不是tf记忆一次的对手。
+序列测试x2：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T2C1-LastMem-csT-deco-cs-mem_att/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.31/0.9436/0.233
+All average forward run time: (0.053864) per frame[矩池云3090]
+不错，推理两次精度刷上来了，虽然比T1C1-tf的模型(29.44)还是有差距，但是证明不同时间的记忆用cross attention聚合是会有提升的，非常nice
 
-# 实现基于cs win cross att的时空记忆聚合 [tmux 1] 约需要h
+# 实现基于cs win cross att的时空记忆聚合 [已完成] 需要55.3h
 # 通过解耦时间和空间进行3D attention，相当于用cs win替代deco版本里的空间attention
 # 并且，仿照temporal focal的思想将各个条形窗口进行池化，获得更general的注意力
 # 我称之为 temporal CSWin (csf) CSWin Focal 可以解耦也可以不解耦
+# 相比于我实现的第二个版本的focal机制，这个v1版本的不太合理，因为他其实就是把平均池化的信息加上去了
 CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csf.json
+默认的半滑窗逻辑测试：
+CUDA_VISIBLE_DEVICES=1 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csf/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.69/0.9409/0.218
+All average forward run time: (0.059280) per frame[矩池云3090]
+一切如我所料，这种与条带方向相同的focal就是没什么diao用
+序列测试：
+CUDA_VISIBLE_DEVICES=1 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csf/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.77/0.9393/0.225
+All average forward run time: (0.027445) per frame[矩池云3090]
+没啥用这个focal v1，还真是一念成魔
+序列测试x2：
+CUDA_VISIBLE_DEVICES=1 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csf/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.03/0.9420/0.211
+All average forward run time: (0.050010) per frame[矩池云3090]
+没啥好说的，就当是映衬牛b的我(focal v2)而存在的吧
 
-# 实现基于cs win cross att的时空记忆聚合 [本地3090] 约需要45.5h
+# 实现基于cs win cross att的时空记忆聚合 [已完成] 需要45.3h     #BEST#
 # 通过解耦时间和空间进行3D attention，相当于用cs win替代deco版本里的空间attention
 # 并且，仿照temporal focal的思想将各个条形窗口进行池化，获得更general的注意力
 # 我称之为 temporal CSWin (csf) CSWin Focal 可以解耦也可以不解耦
 # 优化了Focal的机制，非局部attention的滑窗沿着池化完的kv方向滑动，刚好和原来的条形kv是正交的，这样可以保证能取到全局感受野 Focal-v2
 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csfv2.json
+默认的半滑窗逻辑测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csfv2/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.06/0.9440/0.232
+All average forward run time: (0.081006) per frame[本地3090]
+# 精度确实有上升，但是还没超过tf
+序列测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csfv2/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.22/0.9431/0.234
+All average forward run time: (0.026423) per frame[本地3090]
+！！！超过tf(29.17)了哈哈哈哈哈哈哈哈
+序列测试x2：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csfv2/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.49/0.9456/0.219
+All average forward run time: (0.052125) per frame[本地3090]
+超过了temporal focal, 以0.05PSNR的优势领先，而且速度更快！
 
 # 实现基于cs win cross att的时空记忆聚合 [未开始] 约需要h
 # 不解耦的cswin 配备 focal v2机制
@@ -791,11 +841,36 @@ python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-cs2.json
 # 实现 strip 2 + focal 机制的 cs win cross att 时空记忆聚合 [3090Ti] 约需要43.5h
 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-cs2fv2.json
 
-# 调整序列训练的mask逻辑到和测试时的逻辑一致，即只有切换视频时才重新生成mask [未开始] 约需要h
-python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-tf-mask2.json
+# 调整序列训练的mask逻辑到和测试时的逻辑一致，即只有切换视频时才重新生成mask [已停止30k(单线程版本)] 约需要74h
+# 目前只支持num worker=1因为不同的worker之间似乎无法传递信息。。。真的好慢，明天康康咋改吧
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-tf-mask2.json
+# 我们可以先在本地存好随机mask的参数，然后训练的时候读取参数，虽然笨一点但是好实现，先这样实现一下，如果效果好以后再改改
+# 浅浅测一下worker等于1个，30k次时对比随机mask版本的精度吧
+[固定mask版本]
+序列测试：
+CUDA_VISIBLE_DEVICES=1 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-tf-mask2/gen_030000.pth --dataset davis --data_root datasets/ --timing --memory
+[30k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 27.75/0.9283/0.279
+All average forward run time: (0.025514) per frame[矩池云3090]
+序列测试x2：
+CUDA_VISIBLE_DEVICES=1 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-tf-mask2/gen_030000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 27.77/0.9286/0.278
+All average forward run time: (0.051934) per frame[矩池云3090]
+[随机mask版本]
+序列测试：
+CUDA_VISIBLE_DEVICES=1 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-tf/gen_030000.pth --dataset davis --data_root datasets/ --timing --memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.23/0.9310/0.270
+All average forward run time: (0.026716) per frame[本地3090]
+序列测试x2：
+CUDA_VISIBLE_DEVICES=1 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-tf/gen_030000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.25/0.9313/0.267
+All average forward run time: (0.051893) per frame[本地3090]
+# 30k的时候不如随机mask版本的，先搁置了吧
 
 # 将HRViT中MixCFN的设计迁移到FFN上 [未开始] 约需要h
 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-tf-Mix.json
 
 # 将HRViT中CONV Path的设计迁移到CSWin上 [未开始] 约需要h
 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-cs-CONV.json
+
+# 使用我的3D-deco-focalv2-cswin作为网络的transformer主干试试(cstrans) [未开始] 约需要h
+python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans.json
