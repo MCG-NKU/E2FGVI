@@ -298,6 +298,108 @@ class FusionFeedForward(nn.Module):
         return x
 
 
+class MixConv2d(nn.Module):
+    """MixConv2d from HRViT."""
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: int = 3,
+        stride: int = 1,
+        padding: int = 0,
+        dilation: int = 1,
+        groups: int = 1,
+        bias: bool = True,
+    ) -> None:
+        super().__init__()
+        self.conv_3 = nn.Conv2d(
+            in_channels // 2,
+            out_channels // 2,
+            kernel_size,
+            stride=1,
+            padding=padding,
+            dilation=dilation,
+            groups=groups // 2,
+            bias=bias,
+        )
+        self.conv_5 = nn.Conv2d(
+            in_channels - in_channels // 2,
+            out_channels - out_channels // 2,
+            kernel_size + 2,
+            stride=stride,
+            padding=padding + 1,
+            dilation=dilation,
+            groups=groups - groups // 2,
+            bias=bias,
+        )
+
+    def forward(self, x):
+        x1, x2 = x.chunk(2, dim=1)
+        x1 = self.conv_3(x1)
+        x2 = self.conv_5(x2)
+        x = torch.cat([x1, x2], dim=1)
+        return x
+
+
+class MixFusionFeedForward(nn.Module):
+    """Mix F3N for transformer, by Hao."""
+    def __init__(self, d_model, n_vecs=None, t2t_params=None):
+        super(MixFusionFeedForward, self).__init__()
+        # We set d_ff as a default to 1960
+        # TODO: 研究这里的hidden dim和输入dim挂钩会怎么样
+        hd = 1960   # hidden dim
+        self.conv1 = nn.Sequential(nn.Linear(d_model, hd))
+
+        # MixConv
+        self.mix_conv = MixConv2d(
+            in_channels=hd,
+            out_channels=hd,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+            groups=hd,
+            dilation=1,
+            bias=True,
+        )
+
+        self.conv2 = nn.Sequential(nn.GELU(), nn.Linear(hd, d_model))
+        assert t2t_params is not None and n_vecs is not None
+        self.t2t_params = t2t_params
+
+    def forward(self, x, output_size, T, H, W):
+        n_vecs = 1
+        for i, d in enumerate(self.t2t_params['kernel_size']):
+            n_vecs *= int((output_size[i] + 2 * self.t2t_params['padding'][i] -
+                           (d - 1) - 1) / self.t2t_params['stride'][i] + 1)
+
+        x = self.conv1(x)
+        b, n, c = x.size()
+        normalizer = x.new_ones(b, n, 49).view(-1, n_vecs, 49).permute(0, 2, 1)
+        normalizer = F.fold(normalizer,
+                            output_size=output_size,
+                            kernel_size=self.t2t_params['kernel_size'],
+                            padding=self.t2t_params['padding'],
+                            stride=self.t2t_params['stride'])
+
+        x = F.fold(x.view(-1, n_vecs, c).permute(0, 2, 1),
+                   output_size=output_size,
+                   kernel_size=self.t2t_params['kernel_size'],
+                   padding=self.t2t_params['padding'],
+                   stride=self.t2t_params['stride'])
+
+        x = F.unfold(x / normalizer,
+                     kernel_size=self.t2t_params['kernel_size'],
+                     padding=self.t2t_params['padding'],
+                     stride=self.t2t_params['stride']).permute(
+                         0, 2, 1).contiguous().view(b, n, c)
+
+        x = x.reshape(b*T, H, W, c).permute(0, 3, 1, 2).contiguous()    # B*T, C, H, W
+        x = self.mix_conv(x).permute(0, 2, 3, 1).contiguous().reshape(b, n, c)  # B, T*H*W, C
+
+        x = self.conv2(x)
+        return x
+
+
 def window_partition(x, window_size):
     """
     Args:
@@ -3321,6 +3423,7 @@ class Decoupled3DFocalTransformerBlock(nn.Module):
         cs_focal_v2 (bool): If True, upgrade cswin att with same direction sliding window of pooled feat,
                             Only work with cs_focal=True.
         cs_win_strip (int): cs win attention strip width. Default: 1.
+        mix_f3n (bool): If True, use MixF3N replace F3N.
     """
     def __init__(self,
                  dim,
@@ -3350,7 +3453,8 @@ class Decoupled3DFocalTransformerBlock(nn.Module):
                  mem_att=False,
                  cs_focal=False,
                  cs_focal_v2=False,
-                 cs_win_strip=1):
+                 cs_win_strip=1,
+                 mix_f3n=False):
         super().__init__()
         self.dim = dim
         self.num_heads = num_heads
@@ -3421,7 +3525,12 @@ class Decoupled3DFocalTransformerBlock(nn.Module):
                                                      cs_win_strip=cs_win_strip)
 
         self.norm2 = norm_layer(dim)
-        self.mlp = FusionFeedForward(dim, n_vecs=n_vecs, t2t_params=t2t_params)
+
+        self.mix_f3n = mix_f3n
+        if not mix_f3n:
+            self.mlp = FusionFeedForward(dim, n_vecs=n_vecs, t2t_params=t2t_params)
+        else:
+            self.mlp = MixFusionFeedForward(dim, n_vecs=n_vecs, t2t_params=t2t_params)
 
     def forward(self, x):
 
@@ -3451,8 +3560,13 @@ class Decoupled3DFocalTransformerBlock(nn.Module):
         y = self.norm2(x)
         if not self.token_fusion:
             # default manner
-            x = x + self.mlp(y.view(B, T * H * W, C), output_size).view(
-                B, T, H, W, C)
+            if not self.mix_f3n:
+                x = x + self.mlp(y.view(B, T * H * W, C), output_size).view(
+                    B, T, H, W, C)
+            else:
+                # MixF3N需要额外传递H, W
+                x = x + self.mlp(y.view(B, T * H * W, C), output_size, T, H, W).view(
+                    B, T, H, W, C)
         else:
             x = x + self.mlp(y.view(B, T * H * W, C), (H * 3, W * 3)).view(
                 B, T, H, W, C)
