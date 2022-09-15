@@ -43,7 +43,8 @@
         "cs_focal": 2,
         "cs_trans": 1,
         "mix_f3n": 0,
-        "conv_path": 1
+        "conv_path": 1,
+        "cs_sw": 0
     },
     "trainer": {
         "type": "Adam",

@@ -41,7 +41,10 @@
         "cs_win": 1,
         "mem_att": 0,
         "cs_focal": 2,
-        "cs_trans": 1
+        "cs_trans": 1,
+        "mix_f3n": 0,
+        "conv_path": 0,
+        "cs_sw": 0
     },
     "trainer": {
         "type": "Adam",
