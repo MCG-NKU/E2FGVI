@@ -558,6 +558,8 @@ CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/
 All average forward run time: (0.050231) per frame[本地3090]
 没什么亮点，C通道线性层聚合这条路没必要再坚持走下去了，到这里就行了。后面主要探索attention
 
+=======================Cross Attention=======================
+
 # 使用cross attention代替线性层聚合记忆力 [已完成] 大约需要41h
 # 目前仅实现了对于非局部帧和局部帧都存储的缓存机制进行注意力查询，查询的是残差量，参考MixFormer
 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-cs.json
@@ -809,7 +811,7 @@ CUDA_VISIBLE_DEVICES=1 python evaluate.py --model lite-MFN --ckpt release_model/
 All average forward run time: (0.050010) per frame[矩池云3090]
 没啥好说的，就当是映衬牛b的我(focal v2)而存在的吧
 
-# 实现基于cs win cross att的时空记忆聚合 [已完成] 需要45.3h     #BEST#
+# 实现基于cs win cross att的时空记忆聚合 [已完成] 需要45.3h                                   #BEST#
 # 通过解耦时间和空间进行3D attention，相当于用cs win替代deco版本里的空间attention
 # 并且，仿照temporal focal的思想将各个条形窗口进行池化，获得更general的注意力
 # 我称之为 temporal CSWin (csf) CSWin Focal 可以解耦也可以不解耦
@@ -881,18 +883,62 @@ CUDA_VISIBLE_DEVICES=1 python evaluate.py --model lite-MFN --ckpt release_model/
 All average forward run time: (0.051893) per frame[本地3090]
 # 30k的时候不如随机mask版本的，先搁置了吧
 
-# 将HRViT中MixCFN的设计迁移到FFN上 [tmux0] 约需要56h
+# 将HRViT中MixCFN的设计迁移到FFN上 [已完成] 约需要56h
 # 基于cswin主干，目前也只支持cswin主干，隐藏层数量1960没有改
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans-Mix.json
+默认的半滑窗逻辑测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans-Mix/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.87/0.9410/0.230
+All average forward run time: (0.056623) per frame[矩池云3090]
+MixCFN显著提升了cstrans的精度
+序列测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans-Mix/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.00/0.9404/0.223
+All average forward run time: (0.025997) per frame[矩池云3090]
+MixCFN把精度拉到了29，提升比2的滑窗要大
+序列测试x2：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans-Mix/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.16/0.9419/0.222
+All average forward run time: (0.051845) per frame[矩池云3090]
+至少MixCFN很成功，可以提升cstrans的精度，虽然还是没有temporal focal高
 
-# 将HRViT中CONV Path的设计迁移到CSWin上 [tmux1] 约需要h
+# 将HRViT中CONV Path的设计迁移到CSWin上 [已完成] 约需要54h
 CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans-CONV.json
+默认的半滑窗逻辑测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans-CONV/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.98/0.9410/0.224
+All average forward run time: (0.055370) per frame[矩池云3090]
+CONV Path目前对cstran的提升最大
+序列测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans-CONV/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.03/0.9398/0.228
+All average forward run time: (0.025886) per frame[矩池云3090]
+确实现在CONV Path的提升最大
+序列测试x2：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans-CONV/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.22/0.9416/0.217
+All average forward run time: (0.051553) per frame[矩池云3090]
 
-# 使用我的3D-deco-focalv2-cswin作为网络的transformer主干试试(cstrans) [本地3090] 约需要44.3h
+# 使用我的3D-deco-focalv2-cswin作为网络的transformer主干试试(cstrans) [已完成] 约需要44.5h
 # 显存消耗明显小了，速度也会略快。
 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans.json
+默认的半滑窗逻辑测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.04/0.9354/0.219
+All average forward run time: (0.078621) per frame[本地3090]
+真要比烂的话，滑窗精度还是比这个高的哈哈哈哈哈，可能cstrans是有点轻量级了
+序列测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.82/0.9389/0.214
+All average forward run time: (0.026520) per frame[本地3090]
+事实证明，滑窗是有用的，hh
+序列测试x2：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.03/0.9410/0.210
+All average forward run time: (0.051340) per frame[本地3090]
+嗯，滑窗可以保留了，我们的主干需要滑窗刷一下精度，但怎么说，还是和temporal focal主干差的有点多啊家人们
 
-# 给CSWin加上一个滑窗！注意只有条带宽度超过1滑窗才有意义，不然就是一样的。 [本地3090Ti] 约需要h
+# 给CSWin加上一个滑窗！注意只有条带宽度超过1滑窗才有意义，不然就是一样的。 [已完成] 需要h
 # 宽度不为1的时候你纵向的滑窗，那么池化的时候宽度就应该等于窗口的宽度数据利用率才会更高吧？
 # 除了会加个滑窗，sw还会让cswin池化时生成的张量宽度和条带的宽度相同。
 # 目前只支持解耦的cswin
@@ -900,3 +946,31 @@ python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cst
 # 还需要注意的一点是之前开的3个cswin主干实验，在没有记忆的层上，cswin的self attention用的全部都是默认参数，这非常不好
 # 所以我会停掉前3个实验重新开始
 CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-cs2fv2-cstrans-sw.json
+默认的半滑窗逻辑测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-cs2fv2-cstrans-sw/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.96/0.9416/0.231
+All average forward run time: (0.075242) per frame[3090Ti]
+呃呃，好像不太妙
+序列测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-cs2fv2-cstrans-sw/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.93/0.9400/0.246
+All average forward run time: (0.024158) per frame[3090Ti]
+呃呃，难道是我哪里实现的逻辑有问题吗，不合理啊，还是说真的要把shift过来的给mask掉呢
+序列测试x2：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-cs2fv2-cstrans-sw/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.17/0.9423/0.240
+All average forward run time: (0.047327) per frame[3090Ti]
+呃呃，我不好说
+这个滑窗加上怎么比原本的条带2差了呢，2个可能： 1.滑窗需要mask掉非局部滑窗 2.q需要滑窗 3.cstrans太弱了
+
+# 条带宽度为1，加上条带宽度为2的池化到1的kv(加入滑窗的逻辑) [未开始] 需要h
+# 池化的逻辑里会包括滑窗的逻辑哦
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-cs1fv2-cstrans-pool2.json
+
+# 条带宽度为2的滑窗，但是拆掉非局部窗口 [未开始] 需要h
+# 用swm表示mask掉非局部窗口的sliding window
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-cs2fv2-cstrans-swm.json
+
+# MixCFN/CONV/滑窗全用上！康康精度如何 [3090Ti] 需要h
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-cs2fv2-cstrans-Mix-CONV-sw.json
+

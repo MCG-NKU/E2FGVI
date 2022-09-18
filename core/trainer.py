@@ -231,6 +231,15 @@ class Trainer:
                 else:
                     self.cs_sw = False
 
+                # 是否为cswin引入不同宽度条带池化的机制来增强注意力，只对初始条带宽度1有效
+                if config['model']['pool_strip'] != 0:
+                    self.pool_strip = True
+                    if config['model']['pool_strip'] == 2:
+                        # 使用什么宽度的条带来池化增强当前窗口
+                        self.pool_sw = 2
+                else:
+                    self.pool_strip = False
+
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,
                     token_fusion_simple=self.token_fusion_simple, fusion_skip_connect=self.fusion_skip_connect,
@@ -241,7 +250,8 @@ class Trainer:
                     cross_att=self.cross_att, time_att=self.time_att, time_deco=self.time_deco,
                     temp_focal=self.temp_focal, cs_win=self.cs_win, mem_att=self.mem_att, cs_focal=self.cs_focal,
                     cs_focal_v2=self.cs_focal_v2, cs_win_strip=self.cs_win_strip, cs_trans=self.cs_trans,
-                    mix_f3n=self.mix_f3n, conv_path=self.conv_path, cs_sw=self.cs_sw)
+                    mix_f3n=self.mix_f3n, conv_path=self.conv_path, cs_sw=self.cs_sw,
+                    pool_strip=self.pool_strip, pool_sw=self.pool_sw)
             else:
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,
