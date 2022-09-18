@@ -141,7 +141,7 @@ class InpaintGenerator(BaseNetwork):
                  sub_token_align=False, sub_factor=1, half_memory=False, last_memory=False,
                  cross_att=False, time_att=False, time_deco=False, temp_focal=False, cs_win=False, mem_att=False,
                  cs_focal=False, cs_focal_v2=False, cs_win_strip=1, cs_trans=False, mix_f3n=False, conv_path=False,
-                 cs_sw=False):
+                 cs_sw=False, pool_strip=False, pool_sw=2):
         super(InpaintGenerator, self).__init__()
         # channel = 256   # default
         # hidden = 512    # default
@@ -187,6 +187,8 @@ class InpaintGenerator(BaseNetwork):
         mix_f3n = mix_f3n                           # 如果为True，则使用MixF3N代替原本的F3N，目前仅对于cswin主干生效
         conv_path = conv_path                       # 如果为True，则给attention额外引入CONV path，目前仅对于cswin主干生效
         cs_sw = cs_sw                               # 如果为True，使用滑窗逻辑强化cswin，只对于条带宽度大于1和cswin主干生效
+        pool_strip = pool_strip                     # 如果为True，则将不同宽度的条带池化到1来增强当前窗口，只对初始条带为1有效
+        pool_sw = pool_sw                           # 用来池化增强当前条带的条带宽度
 
         # encoder
         # self.encoder = Encoder()    # default
@@ -377,7 +379,9 @@ class InpaintGenerator(BaseNetwork):
                                                              cs_win_strip=cs_win_strip,
                                                              mix_f3n=mix_f3n,
                                                              conv_path=conv_path,
-                                                             cs_sw=cs_sw),)
+                                                             cs_sw=cs_sw,
+                                                             pool_strip=pool_strip,
+                                                             pool_sw=pool_sw),)
                 elif half_memory:
                     # 只有一半的层有记忆
                     if (i + 1) % 2 == 0:
@@ -438,7 +442,9 @@ class InpaintGenerator(BaseNetwork):
                                                                  cs_win_strip=cs_win_strip,
                                                                  mix_f3n=mix_f3n,
                                                                  conv_path=conv_path,
-                                                                 cs_sw=cs_sw), )
+                                                                 cs_sw=cs_sw,
+                                                                 pool_strip=pool_strip,
+                                                                 pool_sw=pool_sw), )
                     else:
                         # 奇数层没有记忆
                         if not cs_trans:
@@ -481,7 +487,9 @@ class InpaintGenerator(BaseNetwork):
                                                                  cs_win_strip=cs_win_strip,
                                                                  mix_f3n=mix_f3n,
                                                                  conv_path=conv_path,
-                                                                 cs_sw=cs_sw), )
+                                                                 cs_sw=cs_sw,
+                                                                 pool_strip=pool_strip,
+                                                                 pool_sw=pool_sw), )
                 elif last_memory:
                     # 只有最后一层有记忆力
                     if (i + 1) == depths:
@@ -542,7 +550,9 @@ class InpaintGenerator(BaseNetwork):
                                                                  cs_win_strip=cs_win_strip,
                                                                  mix_f3n=mix_f3n,
                                                                  conv_path=conv_path,
-                                                                 cs_sw=cs_sw), )
+                                                                 cs_sw=cs_sw,
+                                                                 pool_strip=pool_strip,
+                                                                 pool_sw=pool_sw), )
                     else:
                         # 前面的层没有记忆
                         if not cs_trans:
@@ -586,7 +596,9 @@ class InpaintGenerator(BaseNetwork):
                                                                  cs_win_strip=cs_win_strip,
                                                                  mix_f3n=mix_f3n,
                                                                  conv_path=conv_path,
-                                                                 cs_sw=cs_sw), )
+                                                                 cs_sw=cs_sw,
+                                                                 pool_strip=pool_strip,
+                                                                 pool_sw=pool_sw), )
 
             self.transformer = nn.Sequential(*blocks)
         else:
