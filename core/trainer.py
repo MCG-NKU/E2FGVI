@@ -234,9 +234,13 @@ class Trainer:
                 # 是否为cswin引入不同宽度条带池化的机制来增强注意力，只对初始条带宽度1有效
                 if config['model']['pool_strip'] != 0:
                     self.pool_strip = True
-                    if config['model']['pool_strip'] == 2:
+                    if config['model']['pool_strip'] == 1:
                         # 使用什么宽度的条带来池化增强当前窗口
+                        self.pool_sw = 1
+                    elif config['model']['pool_strip'] == 2:
                         self.pool_sw = 2
+                    else:
+                        raise Exception('Not implement.')
                 else:
                     self.pool_strip = False
 
