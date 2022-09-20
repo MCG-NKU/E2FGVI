@@ -239,6 +239,8 @@ class Trainer:
                         self.pool_sw = 1
                     elif config['model']['pool_strip'] == 2:
                         self.pool_sw = 2
+                    elif config['model']['pool_strip'] == 4:
+                        self.pool_sw = 4
                     else:
                         raise Exception('Not implement.')
                 else:

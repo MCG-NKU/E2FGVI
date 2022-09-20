@@ -858,6 +858,56 @@ class TemporalLePEAttention(nn.Module):
                         k_large_strip = torch.cat((k_large_strip, k_l), dim=0)
                         v_large_strip = torch.cat((v_large_strip, v_l), dim=0)
 
+                    # 只有副窗口宽度为4时适用以下的滑窗逻辑
+                    if self.pool_sw == 4:
+                        # 先把token都移动了，然后再划分窗口，正值：向下/右移动，负值：向上/左移动
+
+                        for sw_idx in range(0, self.pool_sw - 1):
+                            (k_l, v_l) = map(
+                                lambda t: torch.roll(t,
+                                                     shifts=(0, -(sw_idx + 1)),
+                                                     dims=(1, 2)), (k, v))
+
+                            # 划分一下窗口捏
+                            # k_l: [-1, head, H_sp*W_sp, C/head]
+                            k_l = self.im2cswin(k_l.reshape(B * T, H * W, C), H_sp=self.H_sp, W_sp=self.pool_sw)
+                            v_l = self.im2cswin(v_l.reshape(B * T, H * W, C), H_sp=self.H_sp, W_sp=self.pool_sw)
+
+                            k_l = k_l.permute(0, 1, 3, 2).contiguous() \
+                                .reshape(-1, self.num_heads, C // self.num_heads, self.H_sp, self.pool_sw)
+                            v_l = v_l.permute(0, 1, 3, 2).contiguous() \
+                                .reshape(-1, self.num_heads, C // self.num_heads, self.H_sp, self.pool_sw)
+
+                            k_l = self.strip_pooling[0](k_l)
+                            v_l = self.strip_pooling[0](v_l)
+
+                            k_l = k_l.view(-1, self.num_heads, C // self.num_heads, self.H_sp * self.split_size) \
+                                .permute(0, 1, 3, 2).contiguous()
+                            v_l = v_l.view(-1, self.num_heads, C // self.num_heads, self.H_sp * self.split_size) \
+                                .permute(0, 1, 3, 2).contiguous()
+
+                            # 汇总原本的大窗口和滑窗的窗口
+                            k_large_strip = torch.cat((k_large_strip, k_l), dim=0)
+                            v_large_strip = torch.cat((v_large_strip, v_l), dim=0)
+
+                        # 把信息放到窗口大小维度, 因为也有滑窗所以不需要除以副窗口的宽度
+                        k_large_strip = k_large_strip.reshape(B * T * W // self.split_size,
+                                                              self.split_size,
+                                                              H // self.H_sp, self.num_heads,
+                                                              self.H_sp * self.split_size,
+                                                              C // self.num_heads).permute(0, 2, 3, 1, 4,
+                                                                                           5).contiguous() \
+                            .view(-1, self.num_heads, self.H_sp * self.split_size * self.split_size,
+                                  C // self.num_heads)
+                        v_large_strip = v_large_strip.reshape(B * T * W // self.split_size,
+                                                              self.split_size,
+                                                              H // self.H_sp, self.num_heads,
+                                                              self.H_sp * self.split_size,
+                                                              C // self.num_heads).permute(0, 2, 3, 1, 4,
+                                                                                           5).contiguous() \
+                            .view(-1, self.num_heads, self.H_sp * self.split_size * self.split_size,
+                                  C // self.num_heads)
+
                 elif self.idx == 1:
                     # W_sp等于纵向分辨率时, H相当于是条带宽度
                     k_large_strip = self.im2cswin(k, H_sp=self.pool_sw, W_sp=self.W_sp)
@@ -925,6 +975,54 @@ class TemporalLePEAttention(nn.Module):
                         # 汇总原本的大窗口和滑窗的窗口 窗口数量汇总所以在0维度
                         k_large_strip = torch.cat((k_large_strip, k_u), dim=0)
                         v_large_strip = torch.cat((v_large_strip, v_u), dim=0)
+
+                    # 只有副窗口宽度为4时适用以下的滑窗逻辑
+                    if self.pool_sw == 4:
+                        # 先把token都移动了，然后再划分窗口，正值：向下/右移动，负值：向上/左移动
+
+                        for sw_idx in range(0, self.pool_sw - 1):
+                            (k_u, v_u) = map(
+                                lambda t: torch.roll(t,
+                                                     shifts=(-self.pool_sw // 2, 0),
+                                                     dims=(1, 2)), (k, v))
+
+                            # 划分一下窗口捏
+                            # k_u: [-1, head, H_sp*W_sp, C/head]
+                            k_u = self.im2cswin(k_u.reshape(B * T, H * W, C), H_sp=self.pool_sw, W_sp=self.W_sp)
+                            v_u = self.im2cswin(v_u.reshape(B * T, H * W, C), H_sp=self.pool_sw, W_sp=self.W_sp)
+
+                            k_u = k_u.permute(0, 1, 3, 2).contiguous() \
+                                .reshape(-1, self.num_heads, C // self.num_heads, self.W_sp, self.pool_sw)
+                            v_u = v_u.permute(0, 1, 3, 2).contiguous() \
+                                .reshape(-1, self.num_heads, C // self.num_heads, self.W_sp, self.pool_sw)
+
+                            k_u = self.strip_pooling[0](k_u)
+                            v_u = self.strip_pooling[0](v_u)
+
+                            k_u = k_u.view(-1, self.num_heads, C // self.num_heads, self.split_size * self.W_sp) \
+                                .permute(0, 1, 3, 2).contiguous()
+                            v_u = v_u.view(-1, self.num_heads, C // self.num_heads, self.split_size * self.W_sp) \
+                                .permute(0, 1, 3, 2).contiguous()
+
+                            # 汇总原本的大窗口和滑窗的窗口 窗口数量汇总所以在0维度
+                            k_large_strip = torch.cat((k_large_strip, k_u), dim=0)
+                            v_large_strip = torch.cat((v_large_strip, v_u), dim=0)
+
+                        # 把信息放到窗口大小维度
+                        k_large_strip = k_large_strip.reshape(
+                            B * T * (W // self.W_sp) * H // self.split_size,
+                            self.split_size, self.num_heads,
+                            self.split_size * self.W_sp,
+                            C // self.num_heads).permute(0, 2, 3, 1, 4).contiguous() \
+                            .view(-1, self.num_heads, self.split_size * self.W_sp * self.split_size,
+                                  C // self.num_heads)
+                        v_large_strip = v_large_strip.reshape(
+                            B * T * (W // self.W_sp) * H // self.split_size,
+                            self.split_size, self.num_heads,
+                            self.split_size * self.W_sp,
+                            C // self.num_heads).permute(0, 2, 3, 1, 4).contiguous() \
+                            .view(-1, self.num_heads, self.split_size * self.W_sp * self.split_size,
+                                  C // self.num_heads)
 
             q = self.im2cswin(q)
             k = self.im2cswin(k)
