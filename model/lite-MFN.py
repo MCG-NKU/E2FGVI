@@ -151,8 +151,8 @@ class InpaintGenerator(BaseNetwork):
         reduction = 2
 
         # depths = 8    # default
-        depths = 4       # for cswin tiny d4 model
-        # depths = 2      # 0.08s/frame, 0.07s/frame with hidden = 128,
+        # depths = 4       # for cswin tiny d4 model
+        depths = 2      # 0.08s/frame, 0.07s/frame with hidden = 128,
 
         # 光流引导特征嵌入
         self.flow_guide = flow_guide
