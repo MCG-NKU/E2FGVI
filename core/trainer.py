@@ -245,6 +245,7 @@ class Trainer:
                         raise Exception('Not implement.')
                 else:
                     self.pool_strip = False
+                    self.pool_sw = 2
 
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,
