@@ -529,87 +529,92 @@ class TemporalLePEAttention(nn.Module):
         if self.cs_focal:
             # 用于池化记忆kv的层
             # 使用线性层池化
-            if not self.cs_sw:
-                # 池化到宽度为1
-                self.pool_layers = nn.ModuleList()
-                window_size_glo = [self.H_sp, self.W_sp]
-                self.pool_layers.append(
-                    nn.Linear(window_size_glo[0] * window_size_glo[1], 1))
-                self.pool_layers[-1].weight.data.fill_(
-                    1. / (window_size_glo[0] * window_size_glo[1]))
-                self.pool_layers[-1].bias.data.fill_(0)
-            else:
-                # 池化到宽度为条带的宽度
-                self.pool_layers = nn.ModuleList()
-                window_size_glo = [self.H_sp, self.W_sp]
-                self.pool_layers.append(
-                    nn.Linear(window_size_glo[0] * window_size_glo[1], self.split_size))
-                self.pool_layers[-1].weight.data.fill_(
-                    self.split_size / (window_size_glo[0] * window_size_glo[1]))
-                self.pool_layers[-1].bias.data.fill_(0)
+            # if not self.cs_sw:
+            #     # 池化到宽度为1
+            #     self.pool_layers = nn.ModuleList()
+            #     window_size_glo = [self.H_sp, self.W_sp]
+            #     self.pool_layers.append(
+            #         nn.Linear(window_size_glo[0] * window_size_glo[1], 1))
+            #     self.pool_layers[-1].weight.data.fill_(
+            #         1. / (window_size_glo[0] * window_size_glo[1]))
+            #     self.pool_layers[-1].bias.data.fill_(0)
+            # else:
+
+            # 现在默认是池化到和条带宽度一样的
+            # 池化到宽度为条带的宽度
+            self.pool_layers = nn.ModuleList()
+            window_size_glo = [self.H_sp, self.W_sp]
+            self.pool_layers.append(
+                nn.Linear(window_size_glo[0] * window_size_glo[1], self.split_size))
+            self.pool_layers[-1].weight.data.fill_(
+                self.split_size / (window_size_glo[0] * window_size_glo[1]))
+            self.pool_layers[-1].bias.data.fill_(0)
 
             # 展开函数
             self.unfolds = nn.ModuleList()
 
             if not self.cs_focal_v2:
                 # 使用与池化完特征垂直的滑窗，感受野局限于内部
-                # build relative position bias between local patch and pooled windows
-                if idx == 0:
-                    # H_sp等于纵向分辨率时，纵向的步幅要+1防止翻倍计算全局attention
-                    stride = [2, 1]
-                elif idx == 1:
-                    # 反之当横向的窗口大小等于横向分辨率时，横向的步幅要+1防止翻倍计算全局attention
-                    stride = [1, 2]
-                self.focal_window = [self.H_sp, self.W_sp]
-                kernel_size = self.focal_window
-                # define unfolding operations
-                # 保证unfold后的kv尺寸和原来一样 变向等于是展开了kv
-                self.unfolds += [
-                    nn.Unfold(kernel_size=kernel_size,
-                              stride=stride,
-                              padding=tuple(i // 2 for i in kernel_size))
-                ]
+                # # build relative position bias between local patch and pooled windows
+                # if idx == 0:
+                #     # H_sp等于纵向分辨率时，纵向的步幅要+1防止翻倍计算全局attention
+                #     stride = [2, 1]
+                # elif idx == 1:
+                #     # 反之当横向的窗口大小等于横向分辨率时，横向的步幅要+1防止翻倍计算全局attention
+                #     stride = [1, 2]
+                # self.focal_window = [self.H_sp, self.W_sp]
+                # kernel_size = self.focal_window
+                # # define unfolding operations
+                # # 保证unfold后的kv尺寸和原来一样 变向等于是展开了kv
+                # self.unfolds += [
+                #     nn.Unfold(kernel_size=kernel_size,
+                #               stride=stride,
+                #               padding=tuple(i // 2 for i in kernel_size))
+                # ]
+                raise Exception('The Focal V1 has been dropped from this version.')
             else:
                 # 第二个版本的focal cs win
                 # 使用与池化完特征方向相同的滑窗，感受野扩展到非局部
-                if self.split_size == 1:
-                    # 条形窗口宽度为1
-                    stride = 1
-                    self.focal_window = [self.W_sp, self.H_sp]      # 刚好和原来的窗口相反
-                    kernel_size = self.focal_window
-                    if idx == 0:
-                        # H_sp等于纵向分辨率时，考虑最后一个窗口需要pad H_sp-1, 注意padding是两边的
-                        padding = [0, self.H_sp//2]
-                    elif idx == 1:
-                        # 反之当横向的窗口大小等于横向分辨率时，考虑最后一个窗口需要pad W_sp-1, 注意padding是两边的
-                        padding = [self.W_sp//2, 0]
-                else:
-                    # 条形窗口宽度不为1
-                    if not self.cs_sw:
-                        # 此时池化完的特征宽度上也要padding，并且步幅必须为2
-                        self.focal_window = [self.W_sp, self.H_sp]      # 刚好和原来的窗口相反
-                        kernel_size = self.focal_window
-                        if idx == 0:
-                            # H_sp等于纵向分辨率时，考虑最后一个窗口需要pad H_sp-1, 注意padding是两边的
-                            padding = [self.W_sp//2, self.H_sp//2]
-                            stride = [2, 1]
-                        elif idx == 1:
-                            # 反之当横向的窗口大小等于横向分辨率时，考虑最后一个窗口需要pad W_sp-1, 注意padding是两边的
-                            padding = [self.W_sp//2, self.H_sp//2]
-                            stride = [1, 2]
-                    else:
-                        # 宽度上不需要padding因为会池化到和条带宽度相同
-                        # 似乎和宽度为1的逻辑是一样的？
-                        self.focal_window = [self.W_sp, self.H_sp]      # 刚好和原来的窗口相反
-                        kernel_size = self.focal_window
-                        if idx == 0:
-                            # H_sp等于纵向分辨率时，考虑最后一个窗口需要pad H_sp-1, 注意padding是两边的
-                            padding = [0, self.H_sp//2]
-                            stride = [1, 1]
-                        elif idx == 1:
-                            # 反之当横向的窗口大小等于横向分辨率时，考虑最后一个窗口需要pad W_sp-1, 注意padding是两边的
-                            padding = [self.W_sp//2, 0]
-                            stride = [1, 1]
+                # if self.split_size == 1:
+                #     # 条形窗口宽度为1
+                #     stride = 1
+                #     self.focal_window = [self.W_sp, self.H_sp]      # 刚好和原来的窗口相反
+                #     kernel_size = self.focal_window
+                #     if idx == 0:
+                #         # H_sp等于纵向分辨率时，考虑最后一个窗口需要pad H_sp-1, 注意padding是两边的
+                #         padding = [0, self.H_sp//2]
+                #     elif idx == 1:
+                #         # 反之当横向的窗口大小等于横向分辨率时，考虑最后一个窗口需要pad W_sp-1, 注意padding是两边的
+                #         padding = [self.W_sp//2, 0]
+                # else:
+                # 条形窗口宽度不为1
+                # if not self.cs_sw:
+                #     # 此时池化完的特征宽度上也要padding，并且步幅必须为2
+                #     self.focal_window = [self.W_sp, self.H_sp]      # 刚好和原来的窗口相反
+                #     kernel_size = self.focal_window
+                #     if idx == 0:
+                #         # H_sp等于纵向分辨率时，考虑最后一个窗口需要pad H_sp-1, 注意padding是两边的
+                #         padding = [self.W_sp//2, self.H_sp//2]
+                #         stride = [2, 1]
+                #     elif idx == 1:
+                #         # 反之当横向的窗口大小等于横向分辨率时，考虑最后一个窗口需要pad W_sp-1, 注意padding是两边的
+                #         padding = [self.W_sp//2, self.H_sp//2]
+                #         stride = [1, 2]
+                # else:
+
+                # 现在默认是池化到和条带宽度一样的
+                # 宽度上不需要padding因为会池化到和条带宽度相同
+                # 似乎和宽度为1的逻辑是一样的？
+                self.focal_window = [self.W_sp, self.H_sp]      # 刚好和原来的窗口相反
+                kernel_size = self.focal_window
+                if idx == 0:
+                    # H_sp等于纵向分辨率时，考虑最后一个窗口需要pad H_sp-1, 注意padding是两边的
+                    padding = [0, self.H_sp//2]
+                    stride = [1, 1]
+                elif idx == 1:
+                    # 反之当横向的窗口大小等于横向分辨率时，考虑最后一个窗口需要pad W_sp-1, 注意padding是两边的
+                    padding = [self.W_sp//2, 0]
+                    stride = [1, 1]
 
                 # define unfolding operations
                 # 保证unfold后的kv尺寸和原来一样 变向等于是展开了kv
@@ -748,20 +753,22 @@ class TemporalLePEAttention(nn.Module):
             k_pooled = self.pool_layers[0](k).flatten(-2)  # B, nWh, nWw, T, C
             v_pooled = self.pool_layers[0](v).flatten(-2)  # B, nWh, nWw, T, C
 
-            if self.split_size == 1 or not self.cs_sw:
-                # 转化池化后的kv到需要的shape
-                k_pooled = k_pooled.permute(0, 3, 4, 1, 2).contiguous().reshape(B * T, C, nWh, nWw)  # B*T, C, nWh, nWw
-                v_pooled = v_pooled.permute(0, 3, 4, 1, 2).contiguous().reshape(B * T, C, nWh, nWw)  # B*T, C, nWh, nWw
+            # if self.split_size == 1 or not self.cs_sw:
+            #     # 转化池化后的kv到需要的shape
+            #     k_pooled = k_pooled.permute(0, 3, 4, 1, 2).contiguous().reshape(B * T, C, nWh, nWw)  # B*T, C, nWh, nWw
+            #     v_pooled = v_pooled.permute(0, 3, 4, 1, 2).contiguous().reshape(B * T, C, nWh, nWw)  # B*T, C, nWh, nWw
+            # else:
+
+            # 转化池化后的kv到需要的shape，默认池化到条带宽度，上面的focal v1逻辑已经被抛弃
+            # 条带宽度不为1时池化的形状也不同
+            if self.idx == 0:
+                # 纵向条纹，池化完是横向的
+                k_pooled = k_pooled.permute(0, 3, 4, 1, 2).contiguous().reshape(B * T, C, nWh * self.split_size, nWw)  # B*T, C, nWh, nWw
+                v_pooled = v_pooled.permute(0, 3, 4, 1, 2).contiguous().reshape(B * T, C, nWh * self.split_size, nWw)  # B*T, C, nWh, nWw
             else:
-                # 条带宽度不为1时池化的形状也不同
-                if self.idx == 0:
-                    # 纵向条纹，池化完是横向的
-                    k_pooled = k_pooled.permute(0, 3, 4, 1, 2).contiguous().reshape(B * T, C, nWh * self.split_size, nWw)  # B*T, C, nWh, nWw
-                    v_pooled = v_pooled.permute(0, 3, 4, 1, 2).contiguous().reshape(B * T, C, nWh * self.split_size, nWw)  # B*T, C, nWh, nWw
-                else:
-                    # 横向条纹，池化完是纵向的
-                    k_pooled = k_pooled.permute(0, 3, 4, 1, 2).contiguous().reshape(B * T, C, nWh, nWw * self.split_size)  # B*T, C, nWh, nWw
-                    v_pooled = v_pooled.permute(0, 3, 4, 1, 2).contiguous().reshape(B * T, C, nWh, nWw * self.split_size)  # B*T, C, nWh, nWw
+                # 横向条纹，池化完是纵向的
+                k_pooled = k_pooled.permute(0, 3, 4, 1, 2).contiguous().reshape(B * T, C, nWh, nWw * self.split_size)  # B*T, C, nWh, nWw
+                v_pooled = v_pooled.permute(0, 3, 4, 1, 2).contiguous().reshape(B * T, C, nWh, nWw * self.split_size)  # B*T, C, nWh, nWw
 
             # 恢复kv形状->B, T, H, W, C
             k = k.reshape(B, nWh, nWw, T, C, self.H_sp, self.W_sp).permute(0, 3, 1, 5, 2, 6, 4)\
@@ -1026,6 +1033,7 @@ class TemporalLePEAttention(nn.Module):
 
             q = self.im2cswin(q)
             k = self.im2cswin(k)
+            # 其实这里相当于已经有一个CONV path了
             v, lepe = self.get_lepe(v, self.get_v)
 
         # 滑窗逻辑

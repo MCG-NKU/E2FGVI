@@ -137,22 +137,69 @@ class deconv(nn.Module):
 class InpaintGenerator(BaseNetwork):
     def __init__(self, init_weights=True, flow_align=True, skip_dcn=False, flow_guide=False,
                  token_fusion=False, token_fusion_simple=False, fusion_skip_connect=False,
-                 memory=False, max_mem_len=8, compression_factor=4, mem_pool=False, store_lf=False, align_cache=False,
-                 sub_token_align=False, sub_factor=1, half_memory=False, last_memory=False,
-                 cross_att=False, time_att=False, time_deco=False, temp_focal=False, cs_win=False, mem_att=False,
-                 cs_focal=False, cs_focal_v2=False, cs_win_strip=1, cs_trans=False, mix_f3n=False, conv_path=False,
-                 cs_sw=False, pool_strip=False, pool_sw=2):
+                 memory=True, max_mem_len=1, compression_factor=1, mem_pool=False, store_lf=False, align_cache=False,
+                 sub_token_align=False, sub_factor=1, half_memory=False, last_memory=True,
+                 cross_att=True, time_att=True, time_deco=True, temp_focal=False, cs_win=True, mem_att=False,
+                 cs_focal=True, cs_focal_v2=True, cs_trans=True, mix_f3n=False, conv_path=False,
+                 cs_sw=True, pool_strip=True, pool_sw=1, depths=None, sw_list=[], head_list=[], blk_list=[]):
         super(InpaintGenerator, self).__init__()
-        # channel = 256   # default
-        # hidden = 512    # default
-        # reduction = 1   # default
-        channel = 64
-        hidden = 128
-        reduction = 2
 
-        # depths = 8    # default
-        # depths = 4       # for cswin tiny d4 model
-        depths = 2      # 0.08s/frame, 0.07s/frame with hidden = 128,
+        # large model:
+        channel = 256   # default
+        hidden = 512    # default
+        reduction = 1   # default
+
+        # small model
+        # channel = 64
+        # hidden = 128
+        # reduction = 2
+
+        # 设置transformer参数
+        # 设置trans block的数量
+        if depths is None:
+            # depths = 8    # default
+            # depths = 4       # for cswin tiny d4 model
+            depths = 2  # 0.08s/frame, 0.07s/frame with hidden = 128,
+        else:
+            depths = depths
+
+        # 只有一个stage
+        if not blk_list:
+            # 设置不同层的条带宽度
+            if not sw_list:
+                # 默认条件下不同层的条带宽度都是1
+                for sw_idx in range(0, depths):
+                    sw_list.append(1)
+            else:
+                # 不同层使用不同的宽度
+                sw_list = sw_list
+
+            # 设置不同层的head数量
+            if not head_list:
+                # 默认条件下每层都使用4个head，对于cswin相当于宽度和高度各2个head
+                num_heads = [4] * depths
+            else:
+                # 不同层使用不同的head数量
+                num_heads = head_list
+        else:
+            # 有多个stage
+            depth_cnt = 0
+            self.sw_list = sw_list  # 存一下不同stage的条带宽度设置
+            self.head_list = head_list  # 存一下不同stage的head设置
+            sw_list = []
+            num_heads = []
+            for stage_idx in range(0, len(blk_list)):
+                depth_cnt += blk_list[stage_idx]
+                # 对于每一层都有一个循环
+                for depth_idx in range(0, blk_list[stage_idx]):
+                    # 设置不同层的条带宽度
+                    sw_list.append(self.sw_list[stage_idx])
+                    # 设置不同层的head数量
+                    num_heads.append(self.head_list[stage_idx])
+
+            # 检查一下深度的数量和stage定义的数量是否相等
+            if depth_cnt != depths:
+                raise Exception('Wrong transformer structure config.')
 
         # 光流引导特征嵌入
         self.flow_guide = flow_guide
@@ -183,7 +230,7 @@ class InpaintGenerator(BaseNetwork):
         mem_att = mem_att                           # 如果为True，则使用cross att直接聚合不同迭代的记忆和当前特征
         cs_focal = cs_focal                         # 如果为True，则为cs win增强池化的focal机制
         cs_focal_v2 = cs_focal_v2                   # 如果为True，则cs win的focal基于与池化完的张量方向相同的滑窗实现
-        cs_win_strip = cs_win_strip                 # 决定了 cs win 的条带宽度，默认为1
+        # cs_win_strip = cs_win_strip                 # 决定了 cs win 的条带宽度，默认为1，目前已被sw_list替换；tf主干默认用条带宽度1的
         cs_trans = cs_trans                         # 如果为True，则使用我们增强的cswin替代temporal focal作为trans主干
         mix_f3n = mix_f3n                           # 如果为True，则使用MixF3N代替原本的F3N，目前仅对于cswin主干生效
         conv_path = conv_path                       # 如果为True，则给attention额外引入CONV path，目前仅对于cswin主干生效
@@ -251,7 +298,6 @@ class InpaintGenerator(BaseNetwork):
                            (d - 1) - 1) / stride[i] + 1)
 
         blocks = []
-        num_heads = [4] * depths
         window_size = [(5, 9)] * depths
         focal_windows = [(5, 9)] * depths
         focal_levels = [2] * depths
@@ -350,7 +396,7 @@ class InpaintGenerator(BaseNetwork):
                                                           mem_att=mem_att,
                                                           cs_focal=cs_focal,
                                                           cs_focal_v2=cs_focal_v2,
-                                                          cs_win_strip=cs_win_strip),)
+                                                          cs_win_strip=1),)
                     else:
                         # 使用cs win主干
                         blocks.append(
@@ -377,7 +423,7 @@ class InpaintGenerator(BaseNetwork):
                                                              mem_att=mem_att,
                                                              cs_focal=cs_focal,
                                                              cs_focal_v2=cs_focal_v2,
-                                                             cs_win_strip=cs_win_strip,
+                                                             cs_win_strip=sw_list[i],
                                                              mix_f3n=mix_f3n,
                                                              conv_path=conv_path,
                                                              cs_sw=cs_sw,
@@ -413,7 +459,7 @@ class InpaintGenerator(BaseNetwork):
                                                               mem_att=mem_att,
                                                               cs_focal=cs_focal,
                                                               cs_focal_v2=cs_focal_v2,
-                                                              cs_win_strip=cs_win_strip), )
+                                                              cs_win_strip=1), )
                         else:
                             # 使用cs win主干
                             blocks.append(
@@ -440,7 +486,7 @@ class InpaintGenerator(BaseNetwork):
                                                                  mem_att=mem_att,
                                                                  cs_focal=cs_focal,
                                                                  cs_focal_v2=cs_focal_v2,
-                                                                 cs_win_strip=cs_win_strip,
+                                                                 cs_win_strip=sw_list[i],
                                                                  mix_f3n=mix_f3n,
                                                                  conv_path=conv_path,
                                                                  cs_sw=cs_sw,
@@ -485,7 +531,7 @@ class InpaintGenerator(BaseNetwork):
                                                                  mem_att=mem_att,
                                                                  cs_focal=cs_focal,
                                                                  cs_focal_v2=cs_focal_v2,
-                                                                 cs_win_strip=cs_win_strip,
+                                                                 cs_win_strip=sw_list[i],
                                                                  mix_f3n=mix_f3n,
                                                                  conv_path=conv_path,
                                                                  cs_sw=cs_sw,
@@ -521,7 +567,7 @@ class InpaintGenerator(BaseNetwork):
                                                               mem_att=mem_att,
                                                               cs_focal=cs_focal,
                                                               cs_focal_v2=cs_focal_v2,
-                                                              cs_win_strip=cs_win_strip), )
+                                                              cs_win_strip=1), )
                         else:
                             # 使用cs win主干
                             blocks.append(
@@ -548,7 +594,7 @@ class InpaintGenerator(BaseNetwork):
                                                                  mem_att=mem_att,
                                                                  cs_focal=cs_focal,
                                                                  cs_focal_v2=cs_focal_v2,
-                                                                 cs_win_strip=cs_win_strip,
+                                                                 cs_win_strip=sw_list[i],
                                                                  mix_f3n=mix_f3n,
                                                                  conv_path=conv_path,
                                                                  cs_sw=cs_sw,
@@ -594,7 +640,7 @@ class InpaintGenerator(BaseNetwork):
                                                                  mem_att=mem_att,
                                                                  cs_focal=cs_focal,
                                                                  cs_focal_v2=cs_focal_v2,
-                                                                 cs_win_strip=cs_win_strip,
+                                                                 cs_win_strip=sw_list[i],
                                                                  mix_f3n=mix_f3n,
                                                                  conv_path=conv_path,
                                                                  cs_sw=cs_sw,

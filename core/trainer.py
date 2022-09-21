@@ -181,14 +181,14 @@ class Trainer:
                 # 是否在聚合时空记忆时使用cswin attention
                 if config['model']['cs_win'] != 0:
                     self.cs_win = True
-                    if config['model']['cs_win'] == 2:
-                        # cs_win_strip决定了cswin的条带宽度，默认为1
-                        self.cs_win_strip = 2
-                    else:
-                        self.cs_win_strip = 1
+                    # if config['model']['cs_win'] == 2:
+                    #     # cs_win_strip决定了cswin的条带宽度，默认为1
+                    #     self.cs_win_strip = 2
+                    # else:
+                    #     self.cs_win_strip = 1
                 else:
                     self.cs_win = False
-                    self.cs_win_strip = 1
+                    # self.cs_win_strip = 1
 
                 # 是否使用attention聚合不同时间的记忆和当前特征，而不是使用线性层聚合记忆再attention
                 if config['model']['mem_att'] != 0:
@@ -201,17 +201,22 @@ class Trainer:
                     self.cs_focal = True
                     if config['model']['cs_focal'] == 2:
                         # 改进的正交全局滑窗策略，取到non-local的focal窗口
+                        # 现在默认都是v2了，v1已经被淘汰
                         self.cs_focal_v2 = True
+                    else:
+                        raise Exception('Focal v1 has been given up.')
                 else:
                     self.cs_focal = False
                     self.cs_focal_v2 = False
 
-                # 是否使用3D deco focav2 cswin替换temporal focal trans主干
-                if config['model']['cs_trans'] != 0:
-                    self.cs_trans = True
-                else:
-                    self.cs_trans = False
+            # 是否使用3D deco focav2 cswin替换temporal focal trans主干
+            if config['model']['cs_trans'] != 0:
+                self.cs_trans = True
+            else:
+                self.cs_trans = False
 
+            if self.cs_trans:
+                # cs trans 主干需要的参数
                 # 是否使用MixF3N代替F3N，目前仅对cs win trans block生效
                 if config['model']['mix_f3n'] != 0:
                     self.mix_f3n = True
@@ -247,6 +252,34 @@ class Trainer:
                     self.pool_strip = False
                     self.pool_sw = 2
 
+                # 定义transformer的深度
+                if config['model']['depths'] != 0:
+                    self.depths = config['model']['depths']
+                else:
+                    # 使用网络默认的深度
+                    self.depths = None
+
+                # 定义新trans主干不同层的条带宽度
+                if config['model']['sw_list'] != 0:
+                    self.sw_list = config['model']['sw_list']
+                else:
+                    # 使用网络默认的深度
+                    self.sw_list = []
+
+                # 定义新trans主干不同层的head数量
+                if config['model']['head_list'] != 0:
+                    self.head_list = config['model']['head_list']
+                else:
+                    # 使用网络默认的head数量，也就是每层4个
+                    self.head_list = []
+
+                # 定义不同的stage拥有多少个block
+                if config['model']['blk_list'] != 0:
+                    self.blk_list = config['model']['blk_list']
+                else:
+                    # 使用网络默认的blk数量，也就是深度的数量
+                    self.blk_list = []
+
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,
                     token_fusion_simple=self.token_fusion_simple, fusion_skip_connect=self.fusion_skip_connect,
@@ -256,14 +289,22 @@ class Trainer:
                     sub_factor=self.sub_factor, half_memory=self.half_memory, last_memory=self.last_memory,
                     cross_att=self.cross_att, time_att=self.time_att, time_deco=self.time_deco,
                     temp_focal=self.temp_focal, cs_win=self.cs_win, mem_att=self.mem_att, cs_focal=self.cs_focal,
-                    cs_focal_v2=self.cs_focal_v2, cs_win_strip=self.cs_win_strip, cs_trans=self.cs_trans,
-                    mix_f3n=self.mix_f3n, conv_path=self.conv_path, cs_sw=self.cs_sw,
-                    pool_strip=self.pool_strip, pool_sw=self.pool_sw)
+                    cs_focal_v2=self.cs_focal_v2,
+                    cs_trans=self.cs_trans, mix_f3n=self.mix_f3n, conv_path=self.conv_path, cs_sw=self.cs_sw,
+                    pool_strip=self.pool_strip, pool_sw=self.pool_sw, depths=self.depths, sw_list=self.sw_list,
+                    head_list=self.head_list, blk_list=self.blk_list)
             else:
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,
                     token_fusion_simple=self.token_fusion_simple, fusion_skip_connect=self.fusion_skip_connect,
-                    memory=self.memory)
+                    memory=self.memory, max_mem_len=config['model']['max_mem_len'],
+                    compression_factor=config['model']['compression_factor'], mem_pool=self.mem_pool,
+                    store_lf=self.store_lf, align_cache=self.align_cache, sub_token_align=self.sub_token_align,
+                    sub_factor=self.sub_factor, half_memory=self.half_memory, last_memory=self.last_memory,
+                    cross_att=self.cross_att, time_att=self.time_att, time_deco=self.time_deco,
+                    temp_focal=self.temp_focal, cs_win=self.cs_win, mem_att=self.mem_att, cs_focal=self.cs_focal,
+                    cs_focal_v2=self.cs_focal_v2,
+                    cs_trans=self.cs_trans)
         else:
             self.netG = net.InpaintGenerator()
         print(self.netG)
