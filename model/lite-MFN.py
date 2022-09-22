@@ -137,11 +137,11 @@ class deconv(nn.Module):
 class InpaintGenerator(BaseNetwork):
     def __init__(self, init_weights=True, flow_align=True, skip_dcn=False, flow_guide=False,
                  token_fusion=False, token_fusion_simple=False, fusion_skip_connect=False,
-                 memory=True, max_mem_len=1, compression_factor=1, mem_pool=False, store_lf=False, align_cache=False,
-                 sub_token_align=False, sub_factor=1, half_memory=False, last_memory=True,
-                 cross_att=True, time_att=True, time_deco=True, temp_focal=False, cs_win=True, mem_att=False,
-                 cs_focal=True, cs_focal_v2=True, cs_trans=True, mix_f3n=False, conv_path=False,
-                 cs_sw=True, pool_strip=True, pool_sw=1, depths=None, sw_list=[], head_list=[], blk_list=[]):
+                 memory=False, max_mem_len=1, compression_factor=1, mem_pool=False, store_lf=False, align_cache=False,
+                 sub_token_align=False, sub_factor=1, half_memory=False, last_memory=False,
+                 cross_att=False, time_att=False, time_deco=False, temp_focal=False, cs_win=False, mem_att=False,
+                 cs_focal=False, cs_focal_v2=False, cs_trans=False, mix_f3n=False, conv_path=False,
+                 cs_sw=False, pool_strip=False, pool_sw=1, depths=None, sw_list=[], head_list=[], blk_list=[]):
         super(InpaintGenerator, self).__init__()
 
         # large model:
