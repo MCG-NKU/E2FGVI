@@ -1111,6 +1111,7 @@ CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/
 All average forward run time: (0.053625) per frame[本地3090]
 有效，和Mix/CONV的效果是类似的。没有刷过tf。
 
+###################################大模型##################################################
 # 探索更多结构上的设计，因此使用large-MFN进行探索，刷过E2FGVI就可以完全训练写论文了 [tmux1] 需要h
 这个大模型和cswin一样条带逐渐变宽，但是受限于7x7的patch划分，20和36的最大公约数只能到4
 "depths": 12,
@@ -1119,7 +1120,7 @@ All average forward run time: (0.053625) per frame[本地3090]
 "blk_list": [2, 4, 4, 2]
 CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_large-MFN-mem-T1C1-HalfMem-csT-deco-csfv2-cstrans-Mix-d12.json
 
-# 探索更多结构上的设计，使用large-MFN进行探索 [未开始] 需要h
+# 探索更多结构上的设计，使用large-MFN进行探索 [] 需要h
 不用focal机制，只为了把网络做的更深
 因为3090Ti显存占用了几百MB所以没开起来这个实验。
 "depths": 16,
@@ -1155,7 +1156,8 @@ CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T1C1-Ha
 "blk_list": [2, 4, 5, 2]
 CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_large-MFN-mem-T1C1-HalfMem-csT-deco-csfv2-cstrans-woDCN-Mix-d13.json
 
-# 探索更多结构上的设计，使用large-MFN进行探索 [3090] 需要h
+# 探索更多结构上的设计，使用large-MFN进行探索 [] 需要h
+3090太卡了所以关闭这个实验
 用focal新颖一点，同时拆掉dcn，这样改到亲妈也认不出来
 这是我目前最希望看到好结果的实验，因为比较好写
 和d14的区别是条带宽度会逐渐变宽，并且只在最后一层有记忆力
@@ -1164,3 +1166,12 @@ CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_large-MFN-mem-T1C1-Ha
 "head_list": [2, 4, 8, 16],
 "blk_list": [2, 2, 8, 2]
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans-woDCN-Mix-d14-1244.json
+
+# 探索更多结构上的设计，使用large-MFN进行探索 [3090] 需要h
+尊重原著cswin，减少隐藏层的通道数量，把模型做的更深
+"depths": 16,
+"sw_list": [1, 2, 4, 4],
+"head_list": [2, 4, 8, 16],
+"blk_list": [2, 4, 8, 2],
+"hide_dim": 256
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T1C1-HalfMem-csT-deco-csfv2-cstrans-woDCN-Mix-d16-1244-h256.json

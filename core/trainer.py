@@ -280,6 +280,13 @@ class Trainer:
                     # 使用网络默认的blk数量，也就是深度的数量
                     self.blk_list = []
 
+                # 定义trans block的dim
+                if config['model']['hide_dim'] != 0:
+                    self.hide_dim = config['model']['hide_dim']
+                else:
+                    # 使用网络默认的blk数量，也就是深度的数量
+                    self.hide_dim = None
+
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,
                     token_fusion_simple=self.token_fusion_simple, fusion_skip_connect=self.fusion_skip_connect,
@@ -292,7 +299,7 @@ class Trainer:
                     cs_focal_v2=self.cs_focal_v2,
                     cs_trans=self.cs_trans, mix_f3n=self.mix_f3n, conv_path=self.conv_path, cs_sw=self.cs_sw,
                     pool_strip=self.pool_strip, pool_sw=self.pool_sw, depths=self.depths, sw_list=self.sw_list,
-                    head_list=self.head_list, blk_list=self.blk_list)
+                    head_list=self.head_list, blk_list=self.blk_list, hide_dim=self.hide_dim)
             else:
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,
