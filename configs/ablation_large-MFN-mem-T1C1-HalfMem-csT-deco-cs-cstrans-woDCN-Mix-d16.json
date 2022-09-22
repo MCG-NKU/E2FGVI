@@ -50,7 +50,8 @@
         "depths": 16,
         "sw_list": [1, 1, 1, 1],
         "head_list": [2, 4, 8, 16],
-        "blk_list": [2, 4, 8, 2]
+        "blk_list": [2, 4, 8, 2],
+        "hide_dim": 512
     },
     "trainer": {
         "type": "Adam",
