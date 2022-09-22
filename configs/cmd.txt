@@ -898,6 +898,7 @@ CUDA_VISIBLE_DEVICES=1 python evaluate.py --model lite-MFN --ckpt release_model/
 All average forward run time: (0.051893) per frame[本地3090]
 # 30k的时候不如随机mask版本的，先搁置了吧
 
+#######################新主干##################################
 # 将HRViT中MixCFN的设计迁移到FFN上 [已完成] 约需要56h
 # 基于cswin主干，目前也只支持cswin主干，隐藏层数量1960没有改
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans-Mix.json
@@ -1032,16 +1033,134 @@ CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T1C1-Las
 # 池化层对于kv是公用的，使用线性层来池化，pool_strip表示用多少宽度来池化
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-cs2fv2-cstrans-sw-pool14.json
 
-# 条带宽度为2，加上条带宽度为1的反池化到2的kv [tmux 0] 需要h
+# 条带宽度为2，加上条带宽度为1的反池化到2的kv [已完成] 需要55h
 # 相当于主窗口宽度2，副窗口宽度1，然后把1的反池化到2获得细粒度窗口，在窗口尺寸的维度进行concat
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-cs2fv2-cstrans-sw-pool1.json
+默认的半滑窗逻辑测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-cs2fv2-cstrans-sw-pool1/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.11/0.9416/0.214
+All average forward run time: (0.056990) per frame[矩池云3090]
+我擦这个精度？有点高
+序列测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-cs2fv2-cstrans-sw-pool1/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.01/0.9399/0.230
+All average forward run time: (0.026148) per frame[矩池云3090]
+貌似是目前最高精度的cstrans模型了，反池化的操作还是有用的哈。
+序列测试x2：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-cs2fv2-cstrans-sw-pool1/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.22/0.9419/0.213
+All average forward run time: (0.052260) per frame[矩池云3090]
+副窗口增强的操作确实奏效了，但是我目前还是想探索更多关于模型深度和结构上的设计。
+以后精度不够的时候可以考虑把这个改进加上。
 
-# 条带宽度为2，加上条带宽度为4的池化到2的kv [tmux 1] 需要h
+# 条带宽度为2，加上条带宽度为4的池化到2的kv [已完成] 需要56h
 # 相当于主窗口宽度2，副窗口宽度4，然后把4的池化到2获得大尺度窗口，在窗口尺寸的维度进行concat
 CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-cs2fv2-cstrans-sw-pool4.json
+默认的半滑窗逻辑测试：
+CUDA_VISIBLE_DEVICES=1 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-cs2fv2-cstrans-sw-pool4/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.98/0.9410/0.219
+All average forward run time: (0.056341) per frame[矩池云3090]
+不如我副窗口1的亚像素反池化。
+序列测试：
+CUDA_VISIBLE_DEVICES=1 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-cs2fv2-cstrans-sw-pool4/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.04/0.9401/0.230
+All average forward run time: (0.028864) per frame[矩池云3090]
+但是序列逻辑比副窗口1略强，也是目前最好的cstrans。
+序列测试x2：
+CUDA_VISIBLE_DEVICES=1 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-cs2fv2-cstrans-sw-pool4/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.27/0.9422/0.219
+All average forward run time: (0.057584) per frame[矩池云3090]
+副窗口4主窗口2确实得到了目前最强的lite-cstrans，但是速度真心慢了很多。
 
-# 为了验证滑窗不mask是否对于Mix和CONV造成了干扰，只使用Mix和CONV进行训练 [3090Ti] 需要h
+# 为了验证滑窗不mask是否对于Mix和CONV造成了干扰，只使用Mix和CONV进行训练 [已完成] 需要h
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans-Mix-CONV.json
+默认的半滑窗逻辑测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans-Mix-CONV/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.74/0.9403/0.225
+All average forward run time: (0.074648) per frame[3090Ti]
+Mix和CONV一起用确实是1+1小于1。
+序列测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans-Mix-CONV/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.95/0.9399/0.230
+All average forward run time: (0.024126) per frame[3090Ti]
+不如只用conv或者只用mix的。
+序列测试x2：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans-Mix-CONV/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.14/0.9416/0.224
+All average forward run time: (0.046855) per frame[3090Ti]
+不要一起用Mix和CONV，会变得不幸。
 
-# 为了找到cstrans为什么差的原因，把深度直接扩充两倍，因为大模型扩充两倍也可以训练 [3090] 需要h
+# 为了找到cstrans为什么差的原因，把深度直接扩充两倍，因为大模型扩充两倍也可以训练 [已完成] 需要h
 python train.py -c configs/ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans-d4.json
+"depths": 4,
+"sw_list": [1, 1, 1, 1],
+"head_list": [4, 4, 4, 4],
+默认的半滑窗逻辑测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans-d4/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.16/0.9435/0.219
+All average forward run time: (0.080503) per frame[本地3090]
+家人们。。。
+序列测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans-d4/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.06/0.9416/0.220
+All average forward run time: (0.027297) per frame[本地3090]
+深度增加带来的提升确实是立竿见影。但是，没有超过只有两层的tf主干。
+序列测试x2：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_lite-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans-d4/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.22/0.9432/0.213
+All average forward run time: (0.053625) per frame[本地3090]
+有效，和Mix/CONV的效果是类似的。没有刷过tf。
+
+# 探索更多结构上的设计，因此使用large-MFN进行探索，刷过E2FGVI就可以完全训练写论文了 [tmux1] 需要h
+这个大模型和cswin一样条带逐渐变宽，但是受限于7x7的patch划分，20和36的最大公约数只能到4
+"depths": 12,
+"sw_list": [1, 2, 4, 4],
+"head_list": [2, 4, 8, 16],
+"blk_list": [2, 4, 4, 2]
+CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_large-MFN-mem-T1C1-HalfMem-csT-deco-csfv2-cstrans-Mix-d12.json
+
+# 探索更多结构上的设计，使用large-MFN进行探索 [未开始] 需要h
+不用focal机制，只为了把网络做的更深
+因为3090Ti显存占用了几百MB所以没开起来这个实验。
+"depths": 16,
+"sw_list": [1, 1, 1, 1],
+"head_list": [2, 4, 8, 16],
+"blk_list": [2, 4, 8, 2]
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T1C1-HalfMem-csT-deco-cs-cstrans-Mix-d16.json
+
+# 探索更多结构上的设计，使用large-MFN进行探索 [tmux 0] 需要110h
+用focal新颖一点，同时拆掉dcn，这样改到亲妈也认不出来
+这是我目前最希望看到好结果的实验，因为比较好写
+"depths": 14,
+"sw_list": [1, 1, 1, 1],
+"head_list": [2, 4, 8, 16],
+"blk_list": [2, 2, 8, 2]
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T1C1-HalfMem-csT-deco-csfv2-cstrans-woDCN-Mix-d14.json
+
+# 探索更多结构上的设计，使用large-MFN进行探索 [3090Ti] 需要h
+不用focal机制，也不要dcn，只为了把网络做的更深
+"depths": 16,
+"sw_list": [1, 1, 1, 1],
+"head_list": [2, 4, 8, 16],
+"blk_list": [2, 4, 8, 2]
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T1C1-HalfMem-csT-deco-cs-cstrans-woDCN-Mix-d16.json
+
+# 探索更多结构上的设计，因此使用large-MFN进行探索，刷过E2FGVI就可以完全训练写论文了 [] 需要h
+这个大模型和cswin一样条带逐渐变宽，但是受限于7x7的patch划分，20和36的最大公约数只能到4
+拆掉dcn
+因为3090显存占用了几百MB所以没开起来这个实验。
+"depths": 13,
+"sw_list": [1, 2, 4, 4],
+"head_list": [2, 4, 8, 16],
+"blk_list": [2, 4, 5, 2]
+CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_large-MFN-mem-T1C1-HalfMem-csT-deco-csfv2-cstrans-woDCN-Mix-d13.json
+
+# 探索更多结构上的设计，使用large-MFN进行探索 [3090] 需要h
+用focal新颖一点，同时拆掉dcn，这样改到亲妈也认不出来
+这是我目前最希望看到好结果的实验，因为比较好写
+和d14的区别是条带宽度会逐渐变宽，并且只在最后一层有记忆力
+"depths": 14,
+"sw_list": [1, 2, 4, 4],
+"head_list": [2, 4, 8, 16],
+"blk_list": [2, 2, 8, 2]
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans-woDCN-Mix-d14-1244.json
