@@ -1153,7 +1153,7 @@ CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T1C1-Ha
 "sw_list": [1, 1, 1, 1],
 "head_list": [2, 4, 8, 16],
 "blk_list": [2, 4, 8, 4]
-CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T1C1-HalfMem-csT-deco-cs-cstrans-woDCN-Mix-d20-h256.json
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T1C1-HalfMem-csT-deco-csfv2-cstrans-woDCN-Mix-d20-h256.json
 
 # 探索更多结构上的设计，因此使用large-MFN进行探索，刷过E2FGVI就可以完全训练写论文了 [] 需要h
 这个大模型和cswin一样条带逐渐变宽，但是受限于7x7的patch划分，20和36的最大公约数只能到4
