@@ -403,7 +403,8 @@ class InpaintGenerator(BaseNetwork):
                                                           mem_att=mem_att,
                                                           cs_focal=cs_focal,
                                                           cs_focal_v2=cs_focal_v2,
-                                                          cs_win_strip=1),)
+                                                          cs_win_strip=1,
+                                                          mix_f3n=mix_f3n),)
                     else:
                         # 使用cs win主干
                         blocks.append(
@@ -466,7 +467,8 @@ class InpaintGenerator(BaseNetwork):
                                                               mem_att=mem_att,
                                                               cs_focal=cs_focal,
                                                               cs_focal_v2=cs_focal_v2,
-                                                              cs_win_strip=1), )
+                                                              cs_win_strip=1,
+                                                              mix_f3n=mix_f3n), )
                         else:
                             # 使用cs win主干
                             blocks.append(
@@ -511,7 +513,8 @@ class InpaintGenerator(BaseNetwork):
                                                               n_vecs=n_vecs,
                                                               t2t_params=t2t_params,
                                                               pool_method=pool_method,
-                                                              memory=False))
+                                                              memory=False,
+                                                              mix_f3n=mix_f3n))
                         else:
                             # 使用cs win主干
                             blocks.append(
@@ -574,7 +577,8 @@ class InpaintGenerator(BaseNetwork):
                                                               mem_att=mem_att,
                                                               cs_focal=cs_focal,
                                                               cs_focal_v2=cs_focal_v2,
-                                                              cs_win_strip=1), )
+                                                              cs_win_strip=1,
+                                                              mix_f3n=mix_f3n), )
                         else:
                             # 使用cs win主干
                             blocks.append(
@@ -619,7 +623,8 @@ class InpaintGenerator(BaseNetwork):
                                                               n_vecs=n_vecs,
                                                               t2t_params=t2t_params,
                                                               pool_method=pool_method,
-                                                              memory=False))
+                                                              memory=False,
+                                                              mix_f3n=mix_f3n))
                         else:
                             # 使用cs win主干
                             # 虽然没有记忆，但是self attention也需要用到cswin的一系列参数！
@@ -667,7 +672,8 @@ class InpaintGenerator(BaseNetwork):
                                                   n_vecs=self.keeped_patches,
                                                   t2t_params=t2t_params,
                                                   pool_method=pool_method,
-                                                  token_fusion=True))
+                                                  token_fusion=True,
+                                                  mix_f3n=mix_f3n))
             self.transformer = nn.Sequential(*blocks)
 
         if init_weights:

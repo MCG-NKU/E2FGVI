@@ -2790,6 +2790,7 @@ class TemporalFocalTransformerBlock(nn.Module):
         cs_focal_v2 (bool): If True, upgrade cswin att with same direction sliding window of pooled feat,
                             Only work with cs_focal=True.
         cs_win_strip (int): cs win attention strip width. Default: 1.
+        mix_f3n (bool): If True, enhance f3n with mix_f3n.
     """
     def __init__(self,
                  dim,
@@ -2820,7 +2821,8 @@ class TemporalFocalTransformerBlock(nn.Module):
                  mem_att=False,
                  cs_focal=False,
                  cs_focal_v2=False,
-                 cs_win_strip=1):
+                 cs_win_strip=1,
+                 mix_f3n=False):
         super().__init__()
         self.dim = dim
         self.num_heads = num_heads
@@ -2888,7 +2890,11 @@ class TemporalFocalTransformerBlock(nn.Module):
                                            cs_win_strip=cs_win_strip)
 
         self.norm2 = norm_layer(dim)
-        self.mlp = FusionFeedForward(dim, n_vecs=n_vecs, t2t_params=t2t_params)
+        self.mix_f3n = mix_f3n
+        if not mix_f3n:
+            self.mlp = FusionFeedForward(dim, n_vecs=n_vecs, t2t_params=t2t_params)
+        else:
+            self.mlp = MixFusionFeedForward(dim, n_vecs=n_vecs, t2t_params=t2t_params)
 
     def forward(self, x):
 
@@ -2972,8 +2978,13 @@ class TemporalFocalTransformerBlock(nn.Module):
         y = self.norm2(x)
         if not self.token_fusion:
             # default manner
-            x = x + self.mlp(y.view(B, T * H * W, C), output_size).view(
-                B, T, H, W, C)
+            if not self.mix_f3n:
+                x = x + self.mlp(y.view(B, T * H * W, C), output_size).view(
+                    B, T, H, W, C)
+            else:
+                # MixF3N需要额外传递H, W
+                x = x + self.mlp(y.view(B, T * H * W, C), output_size, T, H, W).view(
+                    B, T, H, W, C)
         else:
             x = x + self.mlp(y.view(B, T * H * W, C), (H * 3, W * 3)).view(
                 B, T, H, W, C)

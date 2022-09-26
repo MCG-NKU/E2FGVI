@@ -663,6 +663,18 @@ All average forward run time: (0.049149) per frame[矩池云3090]
 29.测试两倍深度的cswin使用MixF3N和CONV path会怎么样 large-MFN-T1C1-HalfMem-csT-deco-csfv2-cstrans-test-16层-CONV 基于本地3090测试 可以正常训练
 如果Mix和CONV只能保留1个，那我肯定是选择Mix
 
+30.测试隐藏层1024的cstrans large-MFN-T1C1-HalfMem-csT-deco-csfv2-cstrans-woDCN-Mix-h1024-d8-1244 基于3090Ti测试 可以训练但是很慢
+31.测试隐藏层1024的cstrans 去掉focal large-MFN-T1C1-HalfMem-csT-deco-cs-cstrans-woDCN-Mix-h1024-d8-1244 基于3090Ti测试 可以训练但是很慢
+32.测试隐藏层1024的cstrans large-MFN-T1C1-LastMem-csT-deco-csfv2-cstrans-woDCN-Mix-h1024-d8-1244 基于3090Ti测试 可以正常训练
+33.测试隐藏层1024的cstrans large-MFN-T1C1-LastMem-csT-deco-csfv2-cstrans-woDCN-Mix-h1024-d10-1244 基于3090Ti测试  可以训练但是很慢
+34.测试隐藏层1024的cstrans large-MFN-T1C1-LastMem-csT-deco-csfv2-cstrans-woDCN-Mix-h1024-d9-1244 基于3090Ti测试 可以正常训练
+
+35.测试大模型tf主干加上cross att的记忆机制 large-MFN-T1C1-LastMem-csT-deco-csfv2-woDCN-Mix-d8 基于本地3090测试 可以正常训练
+36.~d10 基于本地3090测试 可以训练但是很慢
+37.~d9 基于本地3090测试 可以正常训练
+38.~+dcn 基于本地3090测试 可以正常训练
+39.~d9+dcn 基于本地3090测试 可以正常训练
+
 # 实现基于窗口cross attention的记忆力聚合 [未开始]
 
 # 实现基于temporal focal cross att的时空记忆聚合 [已完成] 需要47h
@@ -1129,7 +1141,7 @@ CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_large-MFN-mem-T1C1-Ha
 "blk_list": [2, 4, 8, 2]
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T1C1-HalfMem-csT-deco-cs-cstrans-Mix-d16.json
 
-# 探索更多结构上的设计，使用large-MFN进行探索 [tmux 0] 需要110h
+# 探索更多结构上的设计，使用large-MFN进行探索 [已完成] 需要110h
 用focal新颖一点，同时拆掉dcn，这样改到亲妈也认不出来
 这是我目前最希望看到好结果的实验，因为比较好写
 "depths": 14,
@@ -1137,6 +1149,23 @@ CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T1C1-Ha
 "head_list": [2, 4, 8, 16],
 "blk_list": [2, 2, 8, 2]
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T1C1-HalfMem-csT-deco-csfv2-cstrans-woDCN-Mix-d14.json
+默认的半滑窗逻辑测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_large-MFN-mem-T1C1-HalfMem-csT-deco-csfv2-cstrans-woDCN-Mix-d14/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.21/0.9435/0.208
+All average forward run time: (0.121796) per frame[矩池云3090]
+gg
+序列测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_large-MFN-mem-T1C1-HalfMem-csT-deco-csfv2-cstrans-woDCN-Mix-d14/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.02/0.9417/0.225
+All average forward run time: (0.057393) per frame[矩池云3090]
+gg 我是没想到大模型居然比小模型更拉跨，难道是因为有一半的记忆层干扰了模式学习？
+两个1111模型好像都很差，和1244模型对比
+序列测试x2：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_large-MFN-mem-T1C1-HalfMem-csT-deco-csfv2-cstrans-woDCN-Mix-d14/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.24/0.9437/0.210
+All average forward run time: (0.113527) per frame[矩池云3090]
+还有一种可能，就是训练逻辑对于大模型来说很重要，需要和测试模型一致？
+怎么说呢，之前用线性层聚合的时候，tf的大模型PSNR都有个29.99，可能真的是cswin的主干太拉跨了。
 
 # 探索更多结构上的设计，使用large-MFN进行探索 [5k] 需要h
 不用focal机制，也不要dcn，只为了把网络做的更深
@@ -1147,13 +1176,30 @@ CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T1C1-Ha
 "blk_list": [2, 4, 8, 2]
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T1C1-HalfMem-csT-deco-cs-cstrans-woDCN-Mix-d16.json
 
-# 探索更多结构上的设计，使用large-MFN进行探索 [3090Ti] 需要h
+# 探索更多结构上的设计，使用large-MFN进行探索 [已完成] 需要92.6h
 用focal机制，不要dcn，减少隐藏层数量，只为了把网络做的更深
 "depths": 20,
 "sw_list": [1, 1, 1, 1],
 "head_list": [2, 4, 8, 16],
 "blk_list": [2, 4, 8, 4]
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T1C1-HalfMem-csT-deco-csfv2-cstrans-woDCN-Mix-d20-h256.json
+默认的半滑窗逻辑测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_large-MFN-mem-T1C1-HalfMem-csT-deco-csfv2-cstrans-woDCN-Mix-d20-h256/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.17/0.9423/0.202
+All average forward run time: (0.138207) per frame[3090Ti]
+两个256通道隐藏层的差的千篇一律，loss的走势都一样。。。看来这个任务通道数影响很大
+另外对比16层的那个实验，说明1111不如1244即使更深？
+既然隐藏层这么重要，那我h1024能开多少层呢？会不会饱和？
+序列测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_large-MFN-mem-T1C1-HalfMem-csT-deco-csfv2-cstrans-woDCN-Mix-d20-h256/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 28.98/0.9409/0.213
+All average forward run time: (0.051255) per frame[3090Ti]
+彻底整无语了家人们。。。
+序列测试x2：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_large-MFN-mem-T1C1-HalfMem-csT-deco-csfv2-cstrans-woDCN-Mix-d20-h256/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.19/0.9428/0.203
+All average forward run time: (0.101271) per frame[3090Ti]
+不要乱改通道数，会变得不幸。
 
 # 探索更多结构上的设计，因此使用large-MFN进行探索，刷过E2FGVI就可以完全训练写论文了 [] 需要h
 这个大模型和cswin一样条带逐渐变宽，但是受限于7x7的patch划分，20和36的最大公约数只能到4
@@ -1166,7 +1212,7 @@ CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T1C1-Ha
 CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_large-MFN-mem-T1C1-HalfMem-csT-deco-csfv2-cstrans-woDCN-Mix-d13.json
 
 # 探索更多结构上的设计，使用large-MFN进行探索 [] 需要h
-3090太卡了所以关闭这个实验
+3090太卡了所以关闭这个实验, 就是前面正常然后越训练越慢，放到cmd试试，就是不动电脑就没有事情
 用focal新颖一点，同时拆掉dcn，这样改到亲妈也认不出来
 这是我目前最希望看到好结果的实验，因为比较好写
 和d14的区别是条带宽度会逐渐变宽，并且只在最后一层有记忆力
@@ -1176,7 +1222,7 @@ CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_large-MFN-mem-T1C1-Ha
 "blk_list": [2, 2, 8, 2]
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans-woDCN-Mix-d14-1244.json
 
-# 探索更多结构上的设计，使用large-MFN进行探索 [3090] 需要h
+# 探索更多结构上的设计，使用large-MFN进行探索 [已完成] 需要88.3h
 尊重原著cswin，减少隐藏层的通道数量，把模型做的更深
 "depths": 16,
 "sw_list": [1, 2, 4, 4],
@@ -1184,3 +1230,34 @@ CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T1C1-La
 "blk_list": [2, 4, 8, 2],
 "hide_dim": 256
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T1C1-HalfMem-csT-deco-csfv2-cstrans-woDCN-Mix-d16-1244-h256.json
+默认的半滑窗逻辑测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_large-MFN-mem-T1C1-HalfMem-csT-deco-csfv2-cstrans-woDCN-Mix-d16-1244-h256/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.41/0.9457/0.210
+All average forward run time: (0.133148) per frame[本地3090]
+gg
+序列测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_large-MFN-mem-T1C1-HalfMem-csT-deco-csfv2-cstrans-woDCN-Mix-d16-1244-h256/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.25/0.9447/0.223
+All average forward run time: (0.050955) per frame[本地3090]
+gggg，难道是记忆层数太多了？只在最后一层记忆呢？也可能和通道数太少了有关系。
+序列测试x2：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_large-MFN-mem-T1C1-HalfMem-csT-deco-csfv2-cstrans-woDCN-Mix-d16-1244-h256/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.46/0.9464/0.210
+All average forward run time: (0.100988) per frame[本地3090]
+可以试试最大程度的滑窗强化，但是这个基础感觉就比较拉跨。可能是通道数少了一半导致的。hidden只影响trans block的通道数
+看了一眼loss和512隐藏层比的还是完全不一样的。
+
+# 探索更多结构上的设计，使用large-MFN进行探索 [3090Ti] 约需要85.5h
+根据h256的模型表现来看，隐藏层的维度似乎比trans blk的深度更加重要，另外1244模型似乎比1111模型更好，因此开启这个实验。
+我愿称之为cstrans主干的最后机会
+"depths": 9,
+"sw_list": [1, 2, 4, 4],
+"head_list": [2, 4, 8, 16],
+"blk_list": [1, 2, 4, 2],
+"hide_dim": 1024
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans-woDCN-Mix-d9-1244-h1024.json
+
+# 探索更多结构上的设计，使用large-MFN进行探索 [] 约需要h
+最保守的实验，使用temporal focal主干，last mem，cswin cross attention
+纯粹的增量实验，网络更深，并且没有拆掉dcn，先刷精度再说！
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-T1C1-LastMem-csT-deco-csfv2-Mix-d9.json

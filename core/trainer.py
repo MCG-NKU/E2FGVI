@@ -215,13 +215,42 @@ class Trainer:
             else:
                 self.cs_trans = False
 
+            # 是否使用MixF3N代替F3N，目前对两种transformer主干都生效
+            if config['model']['mix_f3n'] != 0:
+                self.mix_f3n = True
+            else:
+                self.mix_f3n = False
+
+            # 定义transformer的深度
+            if config['model']['depths'] != 0:
+                self.depths = config['model']['depths']
+            else:
+                # 使用网络默认的深度
+                self.depths = None
+
+            # 定义trans主干不同层的head数量
+            if config['model']['head_list'] != 0:
+                self.head_list = config['model']['head_list']
+            else:
+                # 使用网络默认的head数量，也就是每层4个
+                self.head_list = []
+
+            # 定义不同的stage拥有多少个block
+            if config['model']['blk_list'] != 0:
+                self.blk_list = config['model']['blk_list']
+            else:
+                # 使用网络默认的blk数量，也就是深度的数量
+                self.blk_list = []
+
+            # 定义trans block的dim
+            if config['model']['hide_dim'] != 0:
+                self.hide_dim = config['model']['hide_dim']
+            else:
+                # 使用网络默认的blk数量，也就是深度的数量
+                self.hide_dim = None
+
             if self.cs_trans:
                 # cs trans 主干需要的参数
-                # 是否使用MixF3N代替F3N，目前仅对cs win trans block生效
-                if config['model']['mix_f3n'] != 0:
-                    self.mix_f3n = True
-                else:
-                    self.mix_f3n = False
 
                 # 是否给attention加一个CONV path，目前仅对cs win trans block生效
                 if config['model']['conv_path'] != 0:
@@ -252,13 +281,6 @@ class Trainer:
                     self.pool_strip = False
                     self.pool_sw = 2
 
-                # 定义transformer的深度
-                if config['model']['depths'] != 0:
-                    self.depths = config['model']['depths']
-                else:
-                    # 使用网络默认的深度
-                    self.depths = None
-
                 # 定义新trans主干不同层的条带宽度
                 if config['model']['sw_list'] != 0:
                     self.sw_list = config['model']['sw_list']
@@ -266,27 +288,7 @@ class Trainer:
                     # 使用网络默认的深度
                     self.sw_list = []
 
-                # 定义新trans主干不同层的head数量
-                if config['model']['head_list'] != 0:
-                    self.head_list = config['model']['head_list']
-                else:
-                    # 使用网络默认的head数量，也就是每层4个
-                    self.head_list = []
-
-                # 定义不同的stage拥有多少个block
-                if config['model']['blk_list'] != 0:
-                    self.blk_list = config['model']['blk_list']
-                else:
-                    # 使用网络默认的blk数量，也就是深度的数量
-                    self.blk_list = []
-
-                # 定义trans block的dim
-                if config['model']['hide_dim'] != 0:
-                    self.hide_dim = config['model']['hide_dim']
-                else:
-                    # 使用网络默认的blk数量，也就是深度的数量
-                    self.hide_dim = None
-
+                # 使用cs主干
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,
                     token_fusion_simple=self.token_fusion_simple, fusion_skip_connect=self.fusion_skip_connect,
@@ -301,6 +303,7 @@ class Trainer:
                     pool_strip=self.pool_strip, pool_sw=self.pool_sw, depths=self.depths, sw_list=self.sw_list,
                     head_list=self.head_list, blk_list=self.blk_list, hide_dim=self.hide_dim)
             else:
+                # 使用tf主干
                 self.netG = net.InpaintGenerator(
                     skip_dcn=self.skip_dcn, flow_guide=self.flow_guide, token_fusion=self.token_fusion,
                     token_fusion_simple=self.token_fusion_simple, fusion_skip_connect=self.fusion_skip_connect,
@@ -311,7 +314,8 @@ class Trainer:
                     cross_att=self.cross_att, time_att=self.time_att, time_deco=self.time_deco,
                     temp_focal=self.temp_focal, cs_win=self.cs_win, mem_att=self.mem_att, cs_focal=self.cs_focal,
                     cs_focal_v2=self.cs_focal_v2,
-                    cs_trans=self.cs_trans)
+                    cs_trans=self.cs_trans, mix_f3n=self.mix_f3n, depths=self.depths, head_list=self.head_list,
+                    blk_list=self.blk_list, hide_dim=self.hide_dim)
         else:
             self.netG = net.InpaintGenerator()
         print(self.netG)
