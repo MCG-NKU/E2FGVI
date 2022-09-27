@@ -71,7 +71,7 @@ datasets/
 退出并杀死当前会话：ctrl+d
 
 # 远程连接tensorboard
-ssh -p 29837 -NL 8008:localhost:9009 root@hz-t2.matpool.com
+ssh -p 29490 -NL 8008:localhost:9009 root@hz-t2.matpool.com
 *9[G6]=zJJ#i0Z%Q
 输入密码后会卡死，直接新开一个终端启动tb就好了
 
@@ -1124,13 +1124,28 @@ All average forward run time: (0.053625) per frame[本地3090]
 有效，和Mix/CONV的效果是类似的。没有刷过tf。
 
 ###################################大模型##################################################
-# 探索更多结构上的设计，因此使用large-MFN进行探索，刷过E2FGVI就可以完全训练写论文了 [tmux1] 需要h
+# 探索更多结构上的设计，因此使用large-MFN进行探索，刷过E2FGVI就可以完全训练写论文了 [已完成] 需要86.3h
 这个大模型和cswin一样条带逐渐变宽，但是受限于7x7的patch划分，20和36的最大公约数只能到4
 "depths": 12,
 "sw_list": [1, 2, 4, 4],
 "head_list": [2, 4, 8, 16],
 "blk_list": [2, 4, 4, 2]
 CUDA_VISIBLE_DEVICES=1 python train.py -c configs/ablation_large-MFN-mem-T1C1-HalfMem-csT-deco-csfv2-cstrans-Mix-d12.json
+默认的半滑窗逻辑测试：
+CUDA_VISIBLE_DEVICES=1 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_large-MFN-mem-T1C1-HalfMem-csT-deco-csfv2-cstrans-Mix-d12/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.69/0.9497/0.200
+All average forward run time: (0.126681) per frame[矩池云3090]
+虽然也摆烂但是，是这四个里面最好的，两个256的不必多说垃圾的不行，比d14好的原因有两个方面：1.有DCN 2.条带逐渐变宽（非常重要）
+序列测试：
+CUDA_VISIBLE_DEVICES=1 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_large-MFN-mem-T1C1-HalfMem-csT-deco-csfv2-cstrans-Mix-d12/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.50/0.9478/0.205
+All average forward run time: (0.059200) per frame[矩池云3090]
+序列测试x2：
+CUDA_VISIBLE_DEVICES=1 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_large-MFN-mem-T1C1-HalfMem-csT-deco-csfv2-cstrans-Mix-d12/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.74/0.9499/0.196
+All average forward run time: (0.118273) per frame[矩池云3090]
+还是老老实实用tf主干。。。
+
 
 # 探索更多结构上的设计，使用large-MFN进行探索 [] 需要h
 不用focal机制，只为了把网络做的更深
@@ -1264,11 +1279,11 @@ CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T1C1-La
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-T1C1-LastMem-csT-deco-csfv2-Mix-d9.json
 
 ############################KITTI360-EX#########################################
-# 直接上我认为最好的模型在KITTI360-EX Out上进行实验 [本地3090]
+# 直接上我认为最好的模型在KITTI360-EX Out上进行实验 [本地3090] 约需要h
 # 训练的mask没有进行腐蚀操作
 # 保留了E2FGVI默认的水平翻转 数据增强
 # 非局部帧只会从之前的帧中取到
 python train.py -c configs/KITTI360EX-O_large-MFN-T1C1-LastMem-csT-deco-csfv2-Mix-d9.json
 
-# 对比默认的E2FGVI结构在KITTI360-EX Out的表现 [未开始]
-python train.py -c configs/KITTI360EX-O_e2fgvi-baseline.json
+# 对比默认的E2FGVI结构在KITTI360-EX Out的表现 [tmux 1] 约需要h
+CUDA_VISIBLE_DEVICES=1 python train.py -c configs/KITTI360EX-O_e2fgvi_baseline.json
