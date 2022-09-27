@@ -1262,3 +1262,13 @@ CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T1C1-La
 纯粹的增量实验，网络更深，并且没有拆掉dcn，先刷精度再说！
 如果精度还行，就拆掉dcn试一试
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-T1C1-LastMem-csT-deco-csfv2-Mix-d9.json
+
+############################KITTI360-EX#########################################
+# 直接上我认为最好的模型在KITTI360-EX Out上进行实验 [本地3090]
+# 训练的mask没有进行腐蚀操作
+# 保留了E2FGVI默认的水平翻转 数据增强
+# 非局部帧只会从之前的帧中取到
+python train.py -c configs/KITTI360EX-O_large-MFN-T1C1-LastMem-csT-deco-csfv2-Mix-d9.json
+
+# 对比默认的E2FGVI结构在KITTI360-EX Out的表现 [未开始]
+python train.py -c configs/KITTI360EX-O_e2fgvi-baseline.json

@@ -4,7 +4,7 @@
     "train_data_loader": {
         "sequence_load": 1,
         "name": "KITTI360-EX",
-        "data_root": "K://KITTI-360EX//OuterPinhole",
+        "data_root": "H://KITTI-360EX//OuterPinhole",
         "w": 432,
         "h": 240,
         "num_local_frames": 5,
