@@ -1257,7 +1257,8 @@ All average forward run time: (0.100988) per frame[本地3090]
 "hide_dim": 1024
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans-woDCN-Mix-d9-1244-h1024.json
 
-# 探索更多结构上的设计，使用large-MFN进行探索 [] 约需要h
+# 探索更多结构上的设计，使用large-MFN进行探索 [tmux0] 约需要h
 最保守的实验，使用temporal focal主干，last mem，cswin cross attention
 纯粹的增量实验，网络更深，并且没有拆掉dcn，先刷精度再说！
+如果精度还行，就拆掉dcn试一试
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-T1C1-LastMem-csT-deco-csfv2-Mix-d9.json

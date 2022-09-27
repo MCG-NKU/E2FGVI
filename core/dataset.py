@@ -92,10 +92,19 @@ class TrainDataset_Mem(torch.utils.data.Dataset):
         self.num_ref_frames = args['num_ref_frames']
         self.size = self.w, self.h = (args['w'], args['h'])
 
-        json_path = os.path.join(args['data_root'], args['name'], 'train.json')
+        if args['name'] != 'KITTI360-EX':
+            json_path = os.path.join(args['data_root'], args['name'], 'train.json')
+        else:
+            json_path = os.path.join(args['data_root'], 'train.json')
+            self.dataset_name = 'KITTI360-EX'
+
         with open(json_path, 'r') as f:
             self.video_dict = json.load(f)
         self.video_names = list(self.video_dict.keys())
+        if args['name'] == 'KITTI360-EX':
+            # 打乱数据顺序防止过拟合
+            from random import shuffle
+            shuffle(self.video_names)
         if debug:
             self.video_names = self.video_names[:100]
 
@@ -246,7 +255,19 @@ class TrainDataset_Mem(torch.utils.data.Dataset):
 
         return item
 
-    def _sample_index_seq(self, length, sample_length, num_ref_frame=3, pivot=0):
+    def _sample_index_seq(self, length, sample_length, num_ref_frame=3, pivot=0, before_nlf=False):
+        """
+
+        Args:
+            length:
+            sample_length:
+            num_ref_frame:
+            pivot:
+            before_nlf: If True, the non local frames will be sampled only from previous frames, not from future.
+
+        Returns:
+
+        """
         complete_idx_set = list(range(length))
         local_idx = complete_idx_set[pivot:pivot + sample_length]
 
@@ -259,7 +280,18 @@ class TrainDataset_Mem(torch.utils.data.Dataset):
                     # 恰好视频长度是局部帧步幅的整数倍，取local_idx为最后一帧5次
                     local_idx.append(complete_idx_set[-1])
 
+        if before_nlf:
+            # 非局部帧只会从过去的视频帧中选取，不会使用未来的信息
+            complete_idx_set = complete_idx_set[:pivot + sample_length]
+
         remain_idx = list(set(complete_idx_set) - set(local_idx))
+
+        # 当只用过去的帧作为非局部帧时，可能会出现过去的帧数量少于非局部帧需求的问题，比如视频的一开始
+        if before_nlf:
+            if len(remain_idx) < num_ref_frame:
+                # 则我们允许从局部帧中采样非局部帧 转换为set可以去除重复元素
+                remain_idx = list(set(remain_idx + local_idx))
+
         ref_index = sorted(random.sample(remain_idx, num_ref_frame))
 
         return local_idx + ref_index
@@ -270,39 +302,91 @@ class TrainDataset_Mem(torch.utils.data.Dataset):
 
         # TODO: 保证每次切换到新视频前mask是一致的，这样记忆才有意义？ 这样逻辑也和测试逻辑一致了
         # create masks
-        if not self.same_mask:
-            # 每次迭代都会生成新形状的随机mask
-            all_masks = create_random_shape_with_random_motion(
-                self.video_dict[video_name], imageHeight=self.h, imageWidth=self.w)
-        else:
-            # 在切换新视频前使用一样的mask参数
-            all_masks, random_dict = create_random_shape_with_random_motion_seq(
-                self.video_dict[video_name], imageHeight=self.h, imageWidth=self.w,
-                new_mask=self.new_mask_list[self.batch_buffer],
-                random_dict=self.random_dict_list[self.batch_buffer])
-            # 更新随机mask的参数
-            self.random_dict_list[self.batch_buffer] = random_dict
+        if self.dataset_name != 'KITTI360-EX':
+            # 对于非KITTI360-EX数据集，随机创建mask
+            if not self.same_mask:
+                # 每次迭代都会生成新形状的随机mask
+                # if self.dataset_name != 'KITTI360-EX':
+                all_masks = create_random_shape_with_random_motion(
+                    self.video_dict[video_name], imageHeight=self.h, imageWidth=self.w)
+                # else:
+                #     # 对于KITTI360训练，需要读取本地存储的mask
+                #     all_masks = []
+                #     for idx in range(0, self.video_dict[video_name]):
+                #         mask_path = os.path.join(self.args['data_root'],
+                #                                  'test_masks',
+                #                                  video_name,
+                #                                  str(idx).zfill(6) + '.png')
+                #         mask = Image.open(mask_path).resize(self.size,
+                #                                             Image.NEAREST).convert('L')
+                #         mask = np.asarray(mask)
+                #         m = np.array(mask > 0).astype(np.uint8)
+                #         m = cv2.dilate(m,
+                #                        cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3)),
+                #                        iterations=4)
+                #         mask = Image.fromarray(m * 255)
+                #         all_masks.append(mask)
+
+            else:
+                # 在切换新视频前使用一样的mask参数
+                all_masks, random_dict = create_random_shape_with_random_motion_seq(
+                    self.video_dict[video_name], imageHeight=self.h, imageWidth=self.w,
+                    new_mask=self.new_mask_list[self.batch_buffer],
+                    random_dict=self.random_dict_list[self.batch_buffer])
+                # 更新随机mask的参数
+                self.random_dict_list[self.batch_buffer] = random_dict
 
         # create sample index
+        # 对于KITTI360-EX这样视场角扩展的场景，非局部帧只能从过去的信息中获取
+        if self.dataset_name == 'KITTI360-EX':
+            before_nlf = True
+        else:
+            # 默认视频补全可以用未来的信息
+            before_nlf = False
         selected_index = self._sample_index_seq(self.video_dict[video_name],
                                                 self.num_local_frames,
                                                 self.num_ref_frames,
-                                                pivot=self.start_index)
+                                                pivot=self.start_index,
+                                                before_nlf=before_nlf)
 
         # read video frames
         frames = []
         masks = []
         for idx in selected_index:
-            video_path = os.path.join(self.args['data_root'],
-                                      self.args['name'], 'JPEGImages',
-                                      f'{video_name}.zip')
+            if self.dataset_name != 'KITTI360-EX':
+                video_path = os.path.join(self.args['data_root'],
+                                          self.args['name'], 'JPEGImages',
+                                          f'{video_name}.zip')
+            else:
+                video_path = os.path.join(self.args['data_root'],
+                                          'JPEGImages',
+                                          f'{video_name}.zip')
             img = TrainZipReader.imread(video_path, idx).convert('RGB')
             img = img.resize(self.size)
             frames.append(img)
-            masks.append(all_masks[idx])
+            if self.dataset_name != 'KITTI360-EX':
+                masks.append(all_masks[idx])
+            else:
+                # 对于KITTI360-EX数据集，读取zip中存储的mask
+                mask_path = os.path.join(self.args['data_root'],
+                                         'test_masks',
+                                          f'{video_name}.zip')
+                mask = TrainZipReader.imread(mask_path, idx)
+                mask = mask.resize(self.size).convert('L')
+                mask = np.asarray(mask)
+                m = np.array(mask > 0).astype(np.uint8)
+                # 不对训练的mask进行膨胀
+                # m = cv2.dilate(m,
+                #                cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3)),
+                #                iterations=4)
+                mask = Image.fromarray(m * 255)
+                masks.append(mask)
 
         # normalizate, to tensors
         frames = GroupRandomHorizontalFlip()(frames)
+        if self.dataset_name == 'KITTI360-EX':
+            # 对于本地读取的mask 也需要随着frame翻转
+            masks = GroupRandomHorizontalFlip()(masks)
         frame_tensors = self._to_tensors(frames) * 2.0 - 1.0
         mask_tensors = self._to_tensors(masks)
 
