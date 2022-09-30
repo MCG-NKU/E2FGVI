@@ -142,7 +142,8 @@ class InpaintGenerator(BaseNetwork):
                  cross_att=False, time_att=False, time_deco=False, temp_focal=False, cs_win=False, mem_att=False,
                  cs_focal=False, cs_focal_v2=False, cs_trans=False, mix_f3n=False, conv_path=False,
                  cs_sw=False, pool_strip=False, pool_sw=1,
-                 depths=None, sw_list=[], head_list=[], blk_list=[], hide_dim=None):
+                 depths=None, sw_list=[], head_list=[], blk_list=[], hide_dim=None,
+                 window_size=None, output_size=None):
         super(InpaintGenerator, self).__init__()
 
         if hide_dim is None:
@@ -244,6 +245,8 @@ class InpaintGenerator(BaseNetwork):
         cs_sw = cs_sw                               # 如果为True，使用滑窗逻辑强化cswin，只对于条带宽度大于1和cswin主干生效
         pool_strip = pool_strip                     # 如果为True，则将不同宽度的条带池化到1来增强当前窗口，只对初始条带为1有效
         pool_sw = pool_sw                           # 用来池化增强当前条带的条带宽度
+        window_size = window_size                   # 窗口的尺寸，相当于patch数量除以4
+        output_size = output_size                   # 输出的尺寸，训练尺寸//4
 
         # encoder
         # self.encoder = Encoder()    # default
@@ -276,7 +279,11 @@ class InpaintGenerator(BaseNetwork):
         kernel_size = (7, 7)    # 滑块的大小
         padding = (3, 3)    # 两个方向上隐式填0的数量
         stride = (3, 3)     # 滑块的步长
-        output_size = (60, 108)
+        if output_size is None:
+            # 默认的输出尺寸
+            output_size = (60, 108)
+        else:
+            output_size = (output_size[0], output_size[1])
         t2t_params = {
             'kernel_size': kernel_size,
             'stride': stride,
@@ -305,8 +312,14 @@ class InpaintGenerator(BaseNetwork):
                            (d - 1) - 1) / stride[i] + 1)
 
         blocks = []
-        window_size = [(5, 9)] * depths
-        focal_windows = [(5, 9)] * depths
+        if window_size is None:
+            window_size = [(5, 9)] * depths
+            focal_windows = [(5, 9)] * depths
+        else:
+            window_size_h = window_size[0]
+            window_size_w = window_size[1]
+            window_size = [(window_size_h, window_size_w)] * depths
+            focal_windows = [(window_size_h, window_size_w)] * depths
         focal_levels = [2] * depths
         pool_method = "fc"
 

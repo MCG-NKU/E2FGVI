@@ -1272,11 +1272,35 @@ All average forward run time: (0.100988) per frame[本地3090]
 "hide_dim": 1024
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans-woDCN-Mix-d9-1244-h1024.json
 
-# 探索更多结构上的设计，使用large-MFN进行探索 [tmux0] 约需要h
+# 探索更多结构上的设计，使用large-MFN进行探索 [已完成] 需要99.5h
 最保守的实验，使用temporal focal主干，last mem，cswin cross attention
 纯粹的增量实验，网络更深，并且没有拆掉dcn，先刷精度再说！
 如果精度还行，就拆掉dcn试一试
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-T1C1-LastMem-csT-deco-csfv2-Mix-d9.json
+默认的半滑窗逻辑测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_large-MFN-T1C1-LastMem-csT-deco-csfv2-Mix-d9/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 30.67/0.9567/0.174
+All average forward run time: (0.118308) per frame[矩池云3090]
+PSNR 比baseline高0.02！大胜利
+序列测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_large-MFN-T1C1-LastMem-csT-deco-csfv2-Mix-d9/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 30.20/0.9528/0.194
+All average forward run time: (0.051457) per frame[矩池云3090]
+自然是快了，但是精度也低了
+序列测试x2：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_large-MFN-T1C1-LastMem-csT-deco-csfv2-Mix-d9/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 30.49/0.9550/0.181
+All average forward run time: (0.103389) per frame[矩池云3090]
+序列测试x5：究极序列测试？其实还有翻转的骚操作没试过
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_large-MFN-T1C1-LastMem-csT-deco-csfv2-Mix-d9/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_fifth
+Finish evaluation... Average Frame PSNR/SSIM/VFID: 30.53/0.9552/0.185
+All average forward run time: (0.256649) per frame
+默认的半滑窗逻辑测试+水平翻转增强逻辑：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_large-MFN-T1C1-LastMem-csT-deco-csfv2-Mix-d9/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory --reverse
+Finish evaluation... Average Frame PSNR/SSIM/VFID: 30.97/0.9590/0.175
+All average forward run time: (0.361344) per frame
+还是这个靠谱，hhh
+
 
 ############################KITTI360-EX#########################################
 # 直接上我认为最好的模型在KITTI360-EX Out上进行实验 [本地3090] 约需要h
@@ -1287,3 +1311,6 @@ python train.py -c configs/KITTI360EX-O_large-MFN-T1C1-LastMem-csT-deco-csfv2-Mi
 
 # 对比默认的E2FGVI结构在KITTI360-EX Out的表现 [tmux 1] 约需要h
 CUDA_VISIBLE_DEVICES=1 python train.py -c configs/KITTI360EX-O_e2fgvi_baseline.json
+
+# FlowLens在KITTI360-EX In上进行实验 [tmux0] 约需要h
+CUDA_VISIBLE_DEVICES=0 python train.py -c configs/KITTI360EX-I_large-MFN-T1C1-LastMem-csT-deco-csfv2-Mix-d9.json

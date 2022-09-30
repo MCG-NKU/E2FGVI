@@ -1562,8 +1562,15 @@ class WindowAttention(nn.Module):
             # build relative position bias between local patch and pooled windows
             for k in range(focal_level - 1):
                 stride = 2**k
-                kernel_size = tuple(2 * (i // 2) + 2**k + (2**k - 1)
-                                    for i in self.focal_window)
+                # 对于奇数和偶数的window size，展开用的kernel尺寸应该不一样。
+                if (self.focal_window[0] % 2 != 0) and (self.focal_window[1] % 2 != 0):
+                    kernel_size = tuple(2 * (i // 2) + 2**k + (2**k - 1)
+                                        for i in self.focal_window)
+                elif (self.focal_window[0] % 2 == 0) and (self.focal_window[1] % 2 == 0):
+                    # kernel_size = tuple(2 * (i // 2)
+                    #                     for i in self.focal_window)
+                    raise Exception('Not support with focal_window % 2 == 0 for now')
+
                 # define unfolding operations
                 self.unfolds += [
                     nn.Unfold(kernel_size=kernel_size,

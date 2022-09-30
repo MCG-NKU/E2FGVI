@@ -249,6 +249,20 @@ class Trainer:
                 # 使用网络默认的blk数量，也就是深度的数量
                 self.hide_dim = None
 
+            # 定义trans block的window个数(token除以window划分大小)
+            if config['model']['window_size'] != 0:
+                self.window_size = config['model']['window_size']
+            else:
+                # 使用网络默认的window
+                self.window_size = None
+
+            # 定义trans block的输出大小
+            if config['model']['output_size'] != 0:
+                self.output_size = config['model']['output_size']
+            else:
+                # 使用网络默认的output_size
+                self.output_size = None
+
             if self.cs_trans:
                 # cs trans 主干需要的参数
 
@@ -301,7 +315,8 @@ class Trainer:
                     cs_focal_v2=self.cs_focal_v2,
                     cs_trans=self.cs_trans, mix_f3n=self.mix_f3n, conv_path=self.conv_path, cs_sw=self.cs_sw,
                     pool_strip=self.pool_strip, pool_sw=self.pool_sw, depths=self.depths, sw_list=self.sw_list,
-                    head_list=self.head_list, blk_list=self.blk_list, hide_dim=self.hide_dim)
+                    head_list=self.head_list, blk_list=self.blk_list, hide_dim=self.hide_dim,
+                    window_size=self.window_size, output_size=self.output_size)
             else:
                 # 使用tf主干
                 self.netG = net.InpaintGenerator(
@@ -315,7 +330,8 @@ class Trainer:
                     temp_focal=self.temp_focal, cs_win=self.cs_win, mem_att=self.mem_att, cs_focal=self.cs_focal,
                     cs_focal_v2=self.cs_focal_v2,
                     cs_trans=self.cs_trans, mix_f3n=self.mix_f3n, depths=self.depths, head_list=self.head_list,
-                    blk_list=self.blk_list, hide_dim=self.hide_dim)
+                    blk_list=self.blk_list, hide_dim=self.hide_dim,
+                    window_size=self.window_size, output_size=self.output_size)
         else:
             self.netG = net.InpaintGenerator()
         print(self.netG)

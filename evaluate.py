@@ -190,6 +190,18 @@ def main_worker(args):
                     torch.cuda.synchronize()
                     time_start = time.time()
                 pred_img, _ = model(masked_frames, len(neighbor_ids))   # forward里会输入局部帧数量来对两种数据分开处理
+
+                # 水平与竖直翻转增强
+                if args.reverse:
+                    masked_frames_horizontal_aug = torch.from_numpy(masked_frames.cpu().numpy()[:, :, :, :, ::-1].copy()).cuda()
+                    pred_img_horizontal_aug, _ = model(masked_frames_horizontal_aug, len(neighbor_ids))
+                    pred_img_horizontal_aug = torch.from_numpy(pred_img_horizontal_aug.cpu().numpy()[:, :, :, ::-1].copy()).cuda()
+                    masked_frames_vertical_aug = torch.from_numpy(masked_frames.cpu().numpy()[:, :, :, ::-1, :].copy()).cuda()
+                    pred_img_vertical_aug, _ = model(masked_frames_vertical_aug, len(neighbor_ids))
+                    pred_img_vertical_aug = torch.from_numpy(pred_img_vertical_aug.cpu().numpy()[:, :, ::-1, :].copy()).cuda()
+
+                    pred_img = 1 / 3 * (pred_img + pred_img_horizontal_aug + pred_img_vertical_aug)
+
                 if args.timing:
                     torch.cuda.synchronize()
                     time_end = time.time()
@@ -235,6 +247,7 @@ def main_worker(args):
                                 np.float32) * 0.5 + img.astype(np.float32) * 0.5
                         ########################################################################################
 
+        # 推理一遍后，额外的推理来刷记忆模型精度
         if args.memory_double:
             for f in range(neighbor_stride//2, video_length, neighbor_stride):
                 if not args.memory:
@@ -349,6 +362,78 @@ def main_worker(args):
                                 comp_frames[idx] = comp_frames[idx].astype(
                                     np.float32) * 0.5 + img.astype(np.float32) * 0.5
                             ########################################################################################
+        elif args.memory_fifth:
+            # 丧心病狂推理5次来刷精度
+            for sliding_start in range(1, neighbor_stride):
+                for f in range(sliding_start, video_length, neighbor_stride):
+                    if not args.memory:
+                        raise Exception('Not support aug with no memory models')
+                    else:
+                        if args.same_memory:
+                            raise Exception('Not support aug with same behavior of e2fgvi')
+                        else:
+                            # 与记忆力模型的训练逻辑一致
+                            if video_length < (f + neighbor_stride):
+                                neighbor_ids = [
+                                    i for i in range(f, video_length)
+                                ]  # 时间上不重叠的窗口，每个局部帧只会被计算一次，视频尾部可能不足5帧局部帧，复制最后一帧补全数量
+                                for repeat_idx in range(0, neighbor_stride - len(neighbor_ids)):
+                                    neighbor_ids.append(neighbor_ids[-1])
+                            else:
+                                neighbor_ids = [
+                                    i for i in range(f, f + neighbor_stride)
+                                ]  # 时间上不重叠的窗口，每个局部帧只会被计算一次
+
+                    if not args.memory:
+                        raise Exception('Not support aug with no memory models')
+                    else:
+                        # 为了保证时间维度一致, 允许输入相同id的帧
+                        if args.same_memory:
+                            raise Exception('Not support aug with same behavior of e2fgvi')
+                        else:
+                            ref_ids = get_ref_index_mem_random(neighbor_ids, video_length,
+                                                               num_ref_frame=3)  # 与序列训练同样的非局部帧输入逻辑
+
+                        selected_imgs_lf = frames[:1, neighbor_ids, :, :, :]
+                        selected_imgs_nlf = frames[:1, ref_ids, :, :, :]
+                        selected_imgs = torch.cat((selected_imgs_lf, selected_imgs_nlf), dim=1)
+                        selected_masks_lf = masks[:1, neighbor_ids, :, :, :]
+                        selected_masks_nlf = masks[:1, ref_ids, :, :, :]
+                        selected_masks = torch.cat((selected_masks_lf, selected_masks_nlf), dim=1)
+
+                    with torch.no_grad():
+                        masked_frames = selected_imgs * (1 - selected_masks)
+
+                        if args.timing:
+                            torch.cuda.synchronize()
+                            time_start = time.time()
+                        pred_img, _ = model(masked_frames, len(neighbor_ids))  # forward里会输入局部帧数量来对两种数据分开处理
+                        if args.timing:
+                            torch.cuda.synchronize()
+                            time_end = time.time()
+                            time_sum = time_end - time_start
+                            time_all += time_sum
+
+                        pred_img = (pred_img + 1) / 2
+                        pred_img = pred_img.cpu().permute(0, 2, 3, 1).numpy() * 255
+                        binary_masks = masks[0, neighbor_ids, :, :, :].cpu().permute(
+                            0, 2, 3, 1).numpy().astype(np.uint8)
+                        for i in range(len(neighbor_ids)):
+                            idx = neighbor_ids[i]
+                            img = np.array(pred_img[i]).astype(np.uint8) * binary_masks[i] \
+                                  + ori_frames[idx] * (1 - binary_masks[i])
+
+                            if not args.good_fusion:
+                                if comp_frames[idx] is None:
+                                    # 如果第一次补全Local Frame中的某帧，直接记录到补全帧list (comp_frames) 里
+                                    comp_frames[idx] = img
+
+                                else:  # default 融合策略：不合理，neighbor_stride倍数的LF的中间帧权重为0.25，应当为0.5
+                                    # 如果不是第一次补全Local Frame中的某帧，即该帧已补全过，则把此前结果与当前帧结果简单加和平均
+                                    comp_frames[idx] = comp_frames[idx].astype(
+                                        np.float32) * 0.5 + img.astype(np.float32) * 0.5
+                            else:
+                                raise Exception('Not support aug with good fusion.')
 
         # calculate metrics
         cur_video_psnr = []
@@ -433,6 +518,9 @@ if __name__ == '__main__':
                         help='test with memory ability in E2FGVI style, not work with --memory_double')
     # TODO: 这里的memory double逻辑还可以把前面两帧也再次估计一遍提升精度
     parser.add_argument('--memory_double', action='store_true', default=False, help='test with memory ability twice')
+    parser.add_argument('--memory_fifth', action='store_true', default=False, help='test with memory ability five times')
+    parser.add_argument('--reverse', action='store_true', default=False,
+                        help='test with horizontal and vertical reverse augmentation')
     args = parser.parse_args()
 
     if args.profile:
