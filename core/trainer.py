@@ -711,18 +711,30 @@ class Trainer:
             # 当有新视频出现时，即start_index为0时，清空记忆缓存
             for start_idx in start_index:
                 if start_idx == 0:
-                    for blk in self.netG.transformer:
-                        try:
-                            # 清空有记忆力的层的记忆缓存
-                            blk.attn.m_k = []
-                            blk.attn.m_v = []
-                        except:
-                            pass
+                    if self.config['world_size'] == 1:
+                        # 单卡清除记忆缓存
+                        for blk in self.netG.transformer:
+                            try:
+                                # 清空有记忆力的层的记忆缓存
+                                blk.attn.m_k = []
+                                blk.attn.m_v = []
+                            except:
+                                pass
+                    else:
+                        # 多卡清除记忆缓存
+                        for blk in self.netG.module.transformer:
+                            try:
+                                # 清空有记忆力的层的记忆缓存
+                                blk.attn.m_k = []
+                                blk.attn.m_v = []
+                            except:
+                                pass
 
             # # debug
             # video_index_list.append(index)
             # start_index_list.append(start_index)
             # video_name_list.append(video_name)
+            # local_rank = self.config['local_rank']
             # ii += 1
             # try:
             #     print('-' * 50)
@@ -730,13 +742,25 @@ class Trainer:
             #     #       % (index[0], start_index[0], index[1], start_index[1], ii))
             #     # print('[Bacth 2] Video Index: %d, Start Frame Index: %d || [Bacth 3] Video Index: %d, Start Frame Index: %d || iter: %d'
             #     #       % (index[2], start_index[2], index[3], start_index[3], ii))
-            #     print(
-            #         '[Bacth 0] Video Name: %s, Start Frame Index: %d || [Bacth 1] Video Name: %s, Start Frame Index: %d || iter: %d'
-            #         % (video_name[0], start_index[0], video_name[1], start_index[1], ii))
+            #
+            #     # 单卡测试
+            #     # print(
+            #     #     '[Bacth 0] Video Name: %s, Start Frame Index: %d || [Bacth 1] Video Name: %s, Start Frame Index: %d || iter: %d'
+            #     #     % (video_name[0], start_index[0], video_name[1], start_index[1], ii))
+            #
+            #     # 多卡测试
+            #     # print(
+            #     #     '[Bacth 0] Video Name: %s, Start Frame Index: %d || iter: %d'
+            #     #     % (video_name[0], start_index[0], ii))
+            #     # print(
+            #     #     '[Cuda %d][Bacth 0] Video Index: %d, Start Frame Index: %d || iter: %d'
+            #     #     % (local_rank, index[0], start_index[0], ii))
+            #     print('[Cuda %d][Bacth 0] Video Index: %d, Start Frame Index: %d || [Bacth 1] Video Index: %d, Start Frame Index: %d || iter: %d'
+            #           % (local_rank, index[0], start_index[0], index[1], start_index[1], ii))
             #     print('-'*50)
             # except:
             #     pass
-            # if ii > 10000:
+            # if ii > 1000:
             #     break
 
             frames, masks = frames.to(device), masks.to(device)

@@ -14,6 +14,7 @@ from core.utils import (TrainZipReader, TestZipReader,
                         create_random_shape_with_random_motion, Stack,
                         ToTorchFormatTensor, GroupRandomHorizontalFlip,
                         create_random_shape_with_random_motion_seq)
+from core.dist import get_local_rank, get_world_size
 
 
 class TrainDataset(torch.utils.data.Dataset):
@@ -119,6 +120,18 @@ class TrainDataset_Mem(torch.utils.data.Dataset):
         self.start = start          # 数据集迭代起点
         self.end = len(self.video_names)              # 数据集迭代终点
         self.batch_size = batch_size    # 用于计算数据集迭代器
+
+        # 多卡DDP训练需要知道数据的local rank
+        self.world_size = get_world_size()
+        # self.local_rank = get_local_rank()
+        # print('#' * 50)
+        # print('[Local Rank %d]' % self.local_rank)
+        # print('#' * 50)
+
+        # 如果多卡ddp，实际上每张卡上是独立进程，每张卡上的batch size是要除以总的卡数的
+        if self.world_size > 1:
+            self.batch_size = self.batch_size // self.world_size
+
         self.index = 0      # 自定义视频index
         self.batch_buffer = 0   # 用于随着batch size更新视频index
         self.new_video_flag = False     # 用于判断是否到了新视频
@@ -138,7 +151,17 @@ class TrainDataset_Mem(torch.utils.data.Dataset):
         self.video_index_list = []
         for i in range(0, self.batch_size):
             # 初始化video id时将不同batch的错开防止数据重复和过拟合
-            self.video_index_list.append(i * len(self.video_names)//self.batch_size)
+            if self.world_size == 1:
+                # 单卡逻辑
+                self.video_index_list.append(i * len(self.video_names)//self.batch_size)
+            else:
+                # 多卡逻辑
+                # 随机初始化视频index
+                self.video_index_list.append(random.randint(0, len(self.video_names)))
+
+                # 每张卡上的都错开最大距离 目前没有调好。因为好像都在主进程上。
+                # local_range = len(self.video_names)//self.world_size
+                # self.video_index_list.append(self.local_rank * local_range + i * local_range//self.batch_size)
 
         # debug
         # self.video_index_list[0] = 58

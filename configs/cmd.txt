@@ -1335,3 +1335,10 @@ All average forward run time: (0.038023) per frame[矩池云3090]
 
 # FlowLens在KITTI360-EX In上进行实验 [tmux0] 约需要113h
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/KITTI360EX-I_large-MFN-T1C1-LastMem-csT-deco-csfv2-Mix-d9.json
+
+# 测试序列训练的dataloader逻辑在保存模型后是否正常，还是重新回归就那么几个视频。
+测试结果是保存模型不会影响序列装载的逻辑，所有的数据都被正常使用了。
+
+# 测试多卡的序列装载训练逻辑
+测试完成bs4 双卡
+每个dataloader的初始index随机。
