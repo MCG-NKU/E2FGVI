@@ -1320,17 +1320,18 @@ All average forward run time: (0.361344) per frame
 # 非局部帧只会从之前的帧中取到
 python train.py -c configs/KITTI360EX-O_large-MFN-T1C1-LastMem-csT-deco-csfv2-Mix-d9.json
 
-# 对比默认的E2FGVI结构在KITTI360-EX Out的表现 [tmux1-500k] 约需要81.7h
+# 对比默认的E2FGVI结构在KITTI360-EX Out的表现 [tmux1-500k] 第一阶段约需要81.7h 第二阶段约需要
 CUDA_VISIBLE_DEVICES=1 python train.py -c configs/KITTI360EX-O_e2fgvi_baseline.json
 序列测试+只使用之前的参考帧:
 CUDA_VISIBLE_DEVICES=1 python evaluate.py --model e2fgvi --ckpt release_model/e2fgvi_KITTI360EX-O_e2fgvi_baseline/gen_250000.pth --dataset KITTI360-EX --data_root datasets//KITTI-360EX//OuterPinhole --fov fov20 --past_ref --timing --memory
 [250k, Outer Fov5]Finish evaluation... Average Frame PSNR/SSIM/VFID: 22.32/0.9746/0.213
 All average forward run time: (0.038503) per frame[矩池云3090]
-还是非常有挑战性的。
 [250k, Outer Fov10]Finish evaluation... Average Frame PSNR/SSIM/VFID: 19.32/0.9354/0.315
 All average forward run time: (0.038065) per frame[矩池云3090]
 [250k, Outer Fov20]Finish evaluation... Average Frame PSNR/SSIM/VFID: 16.71/0.8588/0.412
 All average forward run time: (0.038023) per frame[矩池云3090]
+还是非常有挑战性的。
+[500k, Outer Fov5]
 
-# FlowLens在KITTI360-EX In上进行实验 [tmux0] 约需要h
+# FlowLens在KITTI360-EX In上进行实验 [tmux0] 约需要113h
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/KITTI360EX-I_large-MFN-T1C1-LastMem-csT-deco-csfv2-Mix-d9.json

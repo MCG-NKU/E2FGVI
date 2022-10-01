@@ -31,7 +31,7 @@
         "num_workers": 4,
         "log_freq": 100,
         "save_freq": 5e3,
-        "iterations": 25e4,
+        "iterations": 50e4,
         "scheduler": {
             "type": "MultiStepLR",
             "milestones": [
