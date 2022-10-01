@@ -44,9 +44,34 @@ def get_ref_index_mem(length):
 
 
 # sample reference frames from the remain frames with random behavior like trainning
-def get_ref_index_mem_random(neighbor_ids, video_length, num_ref_frame=3):
-    complete_idx_set = list(range(video_length))
+def get_ref_index_mem_random(neighbor_ids, video_length, num_ref_frame=3, before_nlf=False):
+    """
+
+    Args:
+        neighbor_ids:
+        video_length:
+        num_ref_frame:
+        before_nlf: If True, only sample refer frames from the past.
+
+    Returns:
+
+    """
+    if not before_nlf:
+        # 从过去和未来采集非局部帧
+        complete_idx_set = list(range(video_length))
+    else:
+        # 非局部帧只会从过去的视频帧中选取，不会使用未来的信息
+        complete_idx_set = list(range(neighbor_ids[-1]))
+    # complete_idx_set = list(range(video_length))
+
     remain_idx = list(set(complete_idx_set) - set(neighbor_ids))
+
+    # 当只用过去的帧作为非局部帧时，可能会出现过去的帧数量少于非局部帧需求的问题，比如视频的一开始
+    if before_nlf:
+        if len(remain_idx) < num_ref_frame:
+            # 则我们允许从局部帧中采样非局部帧 转换为set可以去除重复元素
+            remain_idx = list(set(remain_idx + neighbor_ids))
+
     ref_index = sorted(random.sample(remain_idx, num_ref_frame))
     return ref_index
 
@@ -173,6 +198,8 @@ def main_worker(args):
                 # 为了保证时间维度一致, 允许输入相同id的帧
                 if args.same_memory:
                     ref_ids = get_ref_index_mem(video_length)  # ref_ids即为Non-Local Frames, 非局部帧
+                elif args.past_ref:
+                    ref_ids = get_ref_index_mem_random(neighbor_ids, video_length, num_ref_frame=3, before_nlf=True)  # 只允许过去的参考帧
                 else:
                     ref_ids = get_ref_index_mem_random(neighbor_ids, video_length, num_ref_frame=3)  # 与序列训练同样的非局部帧输入逻辑
 
@@ -248,6 +275,7 @@ def main_worker(args):
                         ########################################################################################
 
         # 推理一遍后，额外的推理来刷记忆模型精度
+        # TODO: 让这些额外推理与past_ref兼容
         if args.memory_double:
             for f in range(neighbor_stride//2, video_length, neighbor_stride):
                 if not args.memory:
@@ -503,9 +531,13 @@ def main_worker(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='E2FGVI')
     parser.add_argument('--dataset',
-                        choices=['davis', 'youtube-vos', 'pal'],
-                        type=str)
+                        choices=['davis', 'youtube-vos', 'pal', 'KITTI360-EX'],
+                        type=str)       # 相当于train的‘name’
     parser.add_argument('--data_root', type=str, required=True)
+    parser.add_argument('--fov',
+                        choices=['fov5', 'fov10', 'fov20'],
+                        type=str)  # 对于KITTI360-EX, 测试需要输入fov
+    parser.add_argument('--past_ref', action='store_true', default=False)  # 对于KITTI360-EX, 测试时只允许使用之前的参考帧
     parser.add_argument('--model', choices=['e2fgvi', 'e2fgvi_hq', 'e2fgvi_hq-lite', 'lite-MFN', 'large-MFN'], type=str)
     parser.add_argument('--ckpt', type=str, default=None)
     parser.add_argument('--save_results', action='store_true', default=False)
@@ -522,6 +554,10 @@ if __name__ == '__main__':
     parser.add_argument('--reverse', action='store_true', default=False,
                         help='test with horizontal and vertical reverse augmentation')
     args = parser.parse_args()
+
+    if args.dataset == 'KITTI360-EX':
+        # 对于KITTI360-EX, 测试时只允许使用之前的参考帧
+        args.past_ref = True
 
     if args.profile:
         profile = line_profiler.LineProfiler(main_worker)  # 把函数传递到性能分析器

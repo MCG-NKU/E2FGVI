@@ -1262,7 +1262,7 @@ All average forward run time: (0.100988) per frame[本地3090]
 可以试试最大程度的滑窗强化，但是这个基础感觉就比较拉跨。可能是通道数少了一半导致的。hidden只影响trans block的通道数
 看了一眼loss和512隐藏层比的还是完全不一样的。
 
-# 探索更多结构上的设计，使用large-MFN进行探索 [3090Ti] 约需要85.5h
+# 探索更多结构上的设计，使用large-MFN进行探索 [已完成] 约需要86.5h
 根据h256的模型表现来看，隐藏层的维度似乎比trans blk的深度更加重要，另外1244模型似乎比1111模型更好，因此开启这个实验。
 我愿称之为cstrans主干的最后机会
 "depths": 9,
@@ -1271,8 +1271,19 @@ All average forward run time: (0.100988) per frame[本地3090]
 "blk_list": [1, 2, 4, 2],
 "hide_dim": 1024
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/ablation_large-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans-woDCN-Mix-d9-1244-h1024.json
+默认的半滑窗逻辑测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_large-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans-woDCN-Mix-d9-1244-h1024/gen_250000.pth --dataset davis --data_root datasets/ --good_fusion --timing --memory --same_memory
+[250k, davis]Finish evaluation... Average Frame PSNR/SSIM/VFID: 29.73/0.9488/0.198
+All average forward run time: (0.129083) per frame[3090Ti]
+在CSTrans里是不错的成绩，然鹅没有什么卵用 当然了，可能是因为时间上的注意力还是不够吧，谁知道呢。
+序列测试：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_large-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans-woDCN-Mix-d9-1244-h1024/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory
+[250k, davis][3090Ti]
+序列测试x2：
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --model lite-MFN --ckpt release_model/lite-MFN_ablation_large-MFN-mem-T1C1-LastMem-csT-deco-csfv2-cstrans-woDCN-Mix-d9-1244-h1024/gen_250000.pth --dataset davis --data_root datasets/ --timing --memory --memory_double
+[250k, davis][3090Ti]
 
-# 探索更多结构上的设计，使用large-MFN进行探索 [已完成] 需要99.5h
+# 探索更多结构上的设计，使用large-MFN进行探索 [已完成] 需要99.5h                              # Best (FlowLens)
 最保守的实验，使用temporal focal主干，last mem，cswin cross attention
 纯粹的增量实验，网络更深，并且没有拆掉dcn，先刷精度再说！
 如果精度还行，就拆掉dcn试一试
@@ -1309,8 +1320,17 @@ All average forward run time: (0.361344) per frame
 # 非局部帧只会从之前的帧中取到
 python train.py -c configs/KITTI360EX-O_large-MFN-T1C1-LastMem-csT-deco-csfv2-Mix-d9.json
 
-# 对比默认的E2FGVI结构在KITTI360-EX Out的表现 [tmux 1] 约需要h
+# 对比默认的E2FGVI结构在KITTI360-EX Out的表现 [tmux1-500k] 约需要81.7h
 CUDA_VISIBLE_DEVICES=1 python train.py -c configs/KITTI360EX-O_e2fgvi_baseline.json
+序列测试+只使用之前的参考帧:
+CUDA_VISIBLE_DEVICES=1 python evaluate.py --model e2fgvi --ckpt release_model/e2fgvi_KITTI360EX-O_e2fgvi_baseline/gen_250000.pth --dataset KITTI360-EX --data_root datasets//KITTI-360EX//OuterPinhole --fov fov20 --past_ref --timing --memory
+[250k, Outer Fov5]Finish evaluation... Average Frame PSNR/SSIM/VFID: 22.32/0.9746/0.213
+All average forward run time: (0.038503) per frame[矩池云3090]
+还是非常有挑战性的。
+[250k, Outer Fov10]Finish evaluation... Average Frame PSNR/SSIM/VFID: 19.32/0.9354/0.315
+All average forward run time: (0.038065) per frame[矩池云3090]
+[250k, Outer Fov20]Finish evaluation... Average Frame PSNR/SSIM/VFID: 16.71/0.8588/0.412
+All average forward run time: (0.038023) per frame[矩池云3090]
 
 # FlowLens在KITTI360-EX In上进行实验 [tmux0] 约需要h
 CUDA_VISIBLE_DEVICES=0 python train.py -c configs/KITTI360EX-I_large-MFN-T1C1-LastMem-csT-deco-csfv2-Mix-d9.json

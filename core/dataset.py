@@ -404,8 +404,16 @@ class TestDataset(torch.utils.data.Dataset):
         self.args = args
         self.size = self.w, self.h = args.size
 
-        with open(os.path.join(args.data_root, args.dataset, 'test.json'),
-                  'r') as f:
+        if args.dataset != 'KITTI360-EX':
+            # default manner
+            json_path = os.path.join(args.data_root, args.dataset, 'test.json')
+        else:
+            # for KITTI360-EX
+            json_path = os.path.join(args.data_root, 'test.json')
+
+        # with open(os.path.join(args.data_root, args.dataset, 'test.json'),
+        #           'r') as f:
+        with open(json_path, 'r') as f:
             self.video_dict = json.load(f)
         self.video_names = list(self.video_dict.keys())
 
@@ -429,14 +437,30 @@ class TestDataset(torch.utils.data.Dataset):
         frames = []
         masks = []
         for idx in ref_index:
-            video_path = os.path.join(self.args.data_root, self.args.dataset,
-                                      'JPEGImages', f'{video_name}.zip')
+
+            # read img from zip
+            if self.args.dataset != 'KITTI360-EX':
+                # default manner
+                video_path = os.path.join(self.args.data_root, self.args.dataset, 'JPEGImages', f'{video_name}.zip')
+            else:
+                # for KITTI360-EX
+                video_path = os.path.join(self.args.data_root, 'JPEGImages', f'{video_name}.zip')
+
             img = TestZipReader.imread(video_path, idx).convert('RGB')
             img = img.resize(self.size)
             frames.append(img)
-            mask_path = os.path.join(self.args.data_root, self.args.dataset,
-                                     'test_masks', video_name,
-                                     str(idx).zfill(5) + '.png')
+
+            # read mask from folder
+            if self.args.dataset != 'KITTI360-EX':
+                # default manner
+                mask_path = os.path.join(self.args.data_root, self.args.dataset,
+                                         'test_masks', video_name,
+                                         str(idx).zfill(5) + '.png')
+            else:
+                # for KITTI360-EX: use seq 10 for testing
+                mask_path = os.path.join(self.args.data_root, 'test_masks', 'seq10', self.args.fov, video_name,
+                                         str(idx).zfill(6) + '.png')
+
             mask = Image.open(mask_path).resize(self.size,
                                                 Image.NEAREST).convert('L')
             # origin: 0 indicates missing. now: 1 indicates missing
