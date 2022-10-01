@@ -94,6 +94,7 @@ class TrainDataset_Mem(torch.utils.data.Dataset):
 
         if args['name'] != 'KITTI360-EX':
             json_path = os.path.join(args['data_root'], args['name'], 'train.json')
+            self.dataset_name = args['name']
         else:
             json_path = os.path.join(args['data_root'], 'train.json')
             self.dataset_name = 'KITTI360-EX'
