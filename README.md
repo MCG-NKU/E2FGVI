@@ -15,6 +15,7 @@ This repository contains the official implementation of the following paper:
 [[Paper](https://arxiv.org/abs/2204.02663)]
 [[Demo Video (Youtube)](https://www.youtube.com/watch?v=N--qC3T2wc4)]
 [[演示视频 (B站)](https://www.bilibili.com/video/BV1Ta411n7eH?spm_id_from=333.999.0.0)]
+[[MindSpore Implementation](https://github.com/Dragoniss/minspore-phase2-E2FGVI)]
 [Project Page (TBD)]
 [Poster (TBD)]
 
