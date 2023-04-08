@@ -1,0 +1,3 @@
+python test.py --model e2fgvi_hq --video examples/tennis --mask examples/tennis_mask  --ckpt release_model/E2FGVI-HQ-CVPR22.pth
+# python test.py --model e2fgvi_hq --video ../../mira/water-mark/frame --mask ../../mira/water-mark/mask/  --ckpt release_model/E2FGVI-HQ-CVPR22.pth --set_size --width 540 --height 960 --neighbor_stride 3 --step 50
+# python test.py --model e2fgvi_hq --video ../../mira/water-mark/frame --mask ../../mira/water-mark/mask/  --ckpt release_model/E2FGVI-HQ-CVPR22.pth --set_size --width 720 --height 1280 --neighbor_stride 2 --step 75
