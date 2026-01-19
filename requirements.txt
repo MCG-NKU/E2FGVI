@@ -1,0 +1,73 @@
+# Requirements file for E2FGVI - Successfully tested environment
+# Python version: 3.12.4
+# CUDA: 12.4 (torch wheels), Runtime 12.7
+# GPU: NVIDIA RTX 4070 Laptop
+# Status: ✅ Small-scale training (74 iterations) completed successfully
+# Last validated: 2025-11-14
+
+# === Core PyTorch Stack (GPU-enabled) ===
+# Must install from PyTorch official channel with CUDA 12.4 support
+torch==2.6.0+cu124
+torchvision==0.21.0+cu124
+torchaudio==2.6.0+cu124
+
+# === MMCV (Video Inpainting Core) ===
+mmcv==1.7.2
+# Note: Using pure-Python mode (no native CUDA ops)
+# Fallback deformable conv compatibility layer: core/modules/deform_conv_compat.py
+
+# === Computer Vision & Image Processing ===
+opencv-python==4.10.0.84
+Pillow==10.4.0
+scikit-image==0.24.0
+imageio==2.34.2
+
+# === Numerics & Data ===
+numpy==1.26.4
+scipy==1.14.0
+scikit-learn==1.5.1
+pandas==2.2.2
+
+# === Config & Utility ===
+addict==2.4.0
+PyYAML==6.0.1
+regex==2024.7.24
+
+# === Monitoring & Visualization ===
+tqdm==4.66.4
+matplotlib==3.9.1
+tensorboard==2.17.0
+
+# === Development Tools ===
+yapf==0.43.0
+Jupyter==1.1.1
+ipython==8.32.0
+
+# === Installation Notes ===
+# 1. Create environment:
+#    conda create -n e2fgvi python=3.12.4
+#    conda activate e2fgvi
+#
+# 2. Install PyTorch with CUDA 12.4 (CRITICAL - must match your GPU):
+#    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+#
+# 3. Install remaining dependencies:
+#    pip install -r requirements.txt
+#
+# 4. Verify GPU support:
+#    python check_cuda.py
+#
+# === Key Dependencies ===
+# torch==2.6.0+cu124      - GPU-enabled PyTorch (CUDA 12.4 wheels)
+# mmcv==1.7.2             - Video processing core
+# opencv-python==4.10.0.84 - Video frame I/O
+# tensorboard==2.17.0     - Training visualization
+#
+# === Tested Configuration ===
+# ✅ Python 3.12.4 + PyTorch 2.6.0+cu124 + CUDA 12.4 wheels
+# ✅ NVIDIA RTX 4070 Laptop (8GB VRAM)
+# ✅ Small training: 3 videos × 74 iterations = SUCCESS
+# ✅ Checkpoint saving: gen_*.pth, dis_*.pth, opt_*.pth
+# ✅ Log monitoring: view_training_log.py functional
+# === Known Issues ===
+# ❌ MMCV with native CUDA ops causes runtime errors - use pure-Python mode

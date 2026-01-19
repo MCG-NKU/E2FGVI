@@ -1,0 +1,7 @@
+python test.py --model e2fgvi --video examples\tennis --mask examples\tennis_mask --ckpt release_model\E2FGVI-CVPR22.pth
+
+python test.py --model e2fgvi --video examples/schoolgirls.mp4 --mask examples/schoolgirls_mask  --ckpt release_model/E2FGVI-CVPR22.pth
+
+python test.py --model e2fgvi_hq --video examples\tennis --mask examples\tennis_mask --ckpt release_model\E2FGVI-HQ-CVPR22.pth
+
+python test.py --model e2fgvi_hq --video examples/schoolgirls.mp4 --mask examples/schoolgirls_mask  --ckpt release_model/E2FGVI-HQ-CVPR22.pth

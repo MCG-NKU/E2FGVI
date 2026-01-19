@@ -21,7 +21,9 @@ class TrainDataset(torch.utils.data.Dataset):
         self.num_ref_frames = args['num_ref_frames']
         self.size = self.w, self.h = (args['w'], args['h'])
 
-        json_path = os.path.join(args['data_root'], args['name'], 'train.json')
+        # Support custom train file name via args['train_file']
+        train_file = args.get('train_file', 'train.json')
+        json_path = os.path.join(args['data_root'], args['name'], train_file)
         with open(json_path, 'r') as f:
             self.video_dict = json.load(f)
         self.video_names = list(self.video_dict.keys())

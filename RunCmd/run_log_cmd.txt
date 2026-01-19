@@ -1,0 +1,3 @@
+# pay attention to change the file path
+
+Get-Content C:\Users\Aiur\E2FGVI_Project\E2FGVI\logs\e2fgvi_train_e2fgvi_small.log -Tail 100 -Encoding UTF8 -ErrorAction SilentlyContinue

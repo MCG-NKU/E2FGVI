@@ -1,0 +1,14 @@
+name: e2fgvi-project
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.12.4
+  - pip>=25.0
+  - setuptools>=71.1.0
+  - wheel>=0.43.0
+  - vc=14.3
+  - libffi
+  - pip:

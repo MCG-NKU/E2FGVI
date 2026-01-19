@@ -1,0 +1,47 @@
+{
+    "seed": 2021,
+    "save_dir": "checkpoints/",
+    "distributed": false,
+    "world_size": 1,
+    "local_rank": 0,
+    "global_rank": 0,
+    "device": "cuda",
+    "train_data_loader": {
+        "name": "youtube-vos",
+        "data_root": "datasets",
+        "train_file": "train_small.json",
+        "w": 432,
+        "h": 240,
+        "num_local_frames": 5,
+        "num_ref_frames": 3
+    },
+    "losses": {
+        "hole_weight": 1,
+        "valid_weight": 1,
+        "flow_weight": 1,
+        "adversarial_weight": 0.01,
+        "GAN_LOSS": "hinge"
+    },
+    "model": {
+        "net": "e2fgvi",
+        "no_dis": 0
+    },
+    "trainer": {
+        "type": "Adam",
+        "beta1": 0.0,
+        "beta2": 0.99,
+        "lr": 1e-4,
+        "batch_size": 2,
+        "num_workers": 0,
+        "log_freq": 1,
+        "save_freq": 10,
+        "iterations": 100,
+        "scheduler": {
+            "type": "MultiStepLR",
+            "milestones": [
+                80
+            ],
+            "gamma": 0.1
+        }
+    }
+}

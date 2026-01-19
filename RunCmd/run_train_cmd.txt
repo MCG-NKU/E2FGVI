@@ -1,0 +1,1 @@
+python train.py -c configs/train_e2fgvi_small.json

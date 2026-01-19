@@ -1,0 +1,46 @@
+# Conda environment file generated to match the working environment used to run test.py
+# Adjust `pytorch-cuda` version if you need a different CUDA runtime (e.g. 12.7 vs 12.4).
+# Usage:
+#   conda env create -f environment_e2fgvi.yml
+#   conda activate e2fgvi_env
+# If you prefer pip-only, create a venv and run `pip install -r requirements.txt` instead.
+
+name: e2fgvi_env
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.12
+  - pip
+  # Install PyTorch and CUDA runtime via conda (recommended for binary compatibility)
+  - pytorch::pytorch
+  - pytorch::torchvision
+  - pytorch::torchaudio
+  - pytorch::pytorch-cuda=12.4
+
+  # The remaining packages will be installed by pip to preserve exact wheel versions
+  - pip:
+    - mmcv==1.7.2
+    - opencv-python==4.10.0.84
+    - numpy==1.26.4
+    - addict==2.4.0
+    - PyYAML==6.0.1
+    - regex==2024.7.24
+    - tqdm==4.66.4
+    - yapf==0.43.0
+    - matplotlib==3.9.1
+    - scikit-image==0.24.0
+
+# Notes:
+# - We install PyTorch (and torchvision/torchaudio) through the `pytorch` channel to pick
+#   prebuilt binaries that match the selected `pytorch-cuda` runtime. The pip-installed
+#   packages include mmcv (pure-Python) and other utilities pinned to the versions used
+#   in the working environment.
+# - If you want native mmcv C/C++ CUDA ops, install `mmcv-full` after environment creation
+#   using the OpenMMLab wheel that matches your exact CUDA and PyTorch versions. Example:
+#     pip install mmcv-full -f https://download.openmmlab.com/mmcv/dist/cu121/torch2.1.0/index.html
+#   Replace `cu121/torch2.1.0` with the correct tags for your system.
+# - If your local CUDA runtime is different (e.g. you prefer 12.7), change `pytorch-cuda` above
+#   to the supported value or install PyTorch following instructions on https://pytorch.org.

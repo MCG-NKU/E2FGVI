@@ -4,8 +4,22 @@
 import torch
 import torch.nn as nn
 
-from mmcv.ops import ModulatedDeformConv2d, modulated_deform_conv2d
-from mmcv.cnn import constant_init
+# Try to use mmcv ops, fall back to compatibility layer if mmcv not available
+try:
+    from mmcv.ops import ModulatedDeformConv2d, modulated_deform_conv2d
+    from mmcv.cnn import constant_init
+except (ImportError, ModuleNotFoundError):
+    from model.modules.deform_conv_compat import (
+        ModulatedDeformConv2dCompat as ModulatedDeformConv2d,
+        modulated_deform_conv2d_compat as modulated_deform_conv2d
+    )
+    print("[WARNING] Using deformable convolution compatibility layer")
+    def constant_init(module, val, bias=0):
+        """Simple constant initialization."""
+        if hasattr(module, 'weight'):
+            nn.init.constant_(module.weight, val)
+        if hasattr(module, 'bias') and module.bias is not None:
+            nn.init.constant_(module.bias, bias)
 
 from model.modules.flow_comp import flow_warp
 
